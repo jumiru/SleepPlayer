@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SleepPlayer</string>
+
+    <!-- Playback -->
+    <string name="play">Abspielen</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stopp</string>
+    <string name="next_track">Nächster Titel</string>
+    <string name="no_track">Kein Titel ausgewählt</string>
+    <string name="now_playing">Spielt: %s</string>
+
+    <!-- Volume -->
+    <string name="volume">Lautstärke</string>
+    <string name="volume_label">Lautstärke: %d%%</string>
+
+    <!-- Timer -->
+    <string name="sleep_timer">Sleep-Timer</string>
+    <string name="timer_remaining">Verbleibend: %s</string>
+    <string name="timer_off">Timer aus</string>
+    <string name="timer_set">Timer: %d Min.</string>
+    <string name="minutes_suffix">Min.</string>
+
+    <!-- Permissions -->
+    <string name="permission_rationale">SleepPlayer benötigt Zugriff auf deine Audio-Dateien, um Musik abspielen zu können.</string>
+    <string name="permission_denied">Ohne Berechtigung kann SleepPlayer keine Musik abspielen. Bitte erteile die Berechtigung in den Einstellungen.</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">SleepPlayer Wiedergabe</string>
+    <string name="notification_channel_desc">Zeigt den aktuellen Wiedergabestatus an</string>
+
+    <!-- Misc -->
+    <string name="no_audio_files">Keine Audio-Dateien gefunden</string>
+    <string name="tracks_found">%d Titel gefunden</string>
+    <string name="headphone_hint">Tipp: Kopfhörer-Taste drücken = Play/Pause + Timer neu starten</string>
+
+    <!-- Folder selection -->
+    <string name="folder_label">Audio-Ordner</string>
+    <string name="folder_all">Alle Audio-Dateien</string>
+    <string name="folder_select">Ordner wählen</string>
+    <string name="folder_clear">Zurücksetzen</string>
+    <string name="folder_selected">Ordner: %s</string>
+</resources>
+
+
