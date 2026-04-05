@@ -21,6 +21,7 @@ public class PrefsManager {
     private static final String KEY_RECENT_TRACKS = "recent_tracks";
     private static final String KEY_FOLDER_URI = "folder_uri";
     private static final String KEY_FOLDER_DISPLAY = "folder_display_name";
+    private static final String KEY_RANDOM_MODE = "random_mode";
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -100,6 +101,18 @@ public class PrefsManager {
                 .remove(KEY_FOLDER_URI)
                 .remove(KEY_FOLDER_DISPLAY)
                 .apply();
+    }
+
+    // --- Zufallswiedergabe ---
+
+    /** Speichert den Random-Modus (true = Zufall, false = Reihenfolge). */
+    public void saveRandomMode(boolean random) {
+        prefs.edit().putBoolean(KEY_RANDOM_MODE, random).apply();
+    }
+
+    /** Gibt zurück ob Zufallswiedergabe aktiv ist (Standard: true). */
+    public boolean isRandomMode() {
+        return prefs.getBoolean(KEY_RANDOM_MODE, true);
     }
 
     // --- Zuletzt gespielte Titel ---

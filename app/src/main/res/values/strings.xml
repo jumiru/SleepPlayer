@@ -9,6 +9,11 @@
     <string name="next_track">Nächster Titel</string>
     <string name="no_track">Kein Titel ausgewählt</string>
     <string name="now_playing">Spielt: %s</string>
+    <string name="album_art_desc">Album-Cover</string>
+    <string name="settings">Einstellungen</string>
+    <string name="settings_folder_title">Audio-Ordner</string>
+    <string name="settings_folder_select">Ordner wählen…</string>
+    <string name="settings_folder_clear">Ordner-Filter zurücksetzen</string>
 
     <!-- Volume -->
     <string name="volume">Lautstärke</string>
@@ -33,6 +38,11 @@
     <string name="no_audio_files">Keine Audio-Dateien gefunden</string>
     <string name="tracks_found">%d Titel gefunden</string>
     <string name="headphone_hint">Tipp: Kopfhörer-Taste drücken = Play/Pause + Timer neu starten</string>
+
+    <!-- Random / Sequential mode -->
+    <string name="random_mode">Wiedergabe-Modus</string>
+    <string name="mode_random">🔀 Zufall</string>
+    <string name="mode_sequential">🔁 Wiederholen</string>
 
     <!-- Folder selection -->
     <string name="folder_label">Audio-Ordner</string>

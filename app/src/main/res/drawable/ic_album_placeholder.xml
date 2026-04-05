@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Platzhalter wenn kein Album-Cover verfügbar -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+
+    <!-- Hintergrundkreis -->
+    <path
+        android:fillColor="#2D2D3A"
+        android:pathData="M48,48m-48,0a48,48 0,1 1,96 0a48,48 0,1 1,-96 0" />
+
+    <!-- Äußerer Ring -->
+    <path
+        android:fillColor="#3D3D55"
+        android:pathData="M48,48m-32,0a32,32 0,1 1,64 0a32,32 0,1 1,-64 0" />
+
+    <!-- Innerer Kreis (Plattenmitte) -->
+    <path
+        android:fillColor="#2D2D3A"
+        android:pathData="M48,48m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0" />
+
+    <!-- Musiknote -->
+    <path
+        android:fillColor="#7070AA"
+        android:pathData="M44,34 L44,52 Q44,55 41,55 Q38,55 38,52 Q38,49 41,49 L41,37 L54,34 L54,48 Q54,51 51,51 Q48,51 48,48 Q48,45 51,45 L51,37 Z" />
+
+</vector>
+

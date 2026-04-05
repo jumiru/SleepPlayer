@@ -1,6 +1,7 @@
 package com.example.sleepplayer;
 
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
@@ -37,15 +38,24 @@ public class TrackSelector {
         public final String title;
         public final String artist;
         public final String album;
-        public final long duration; // in Millisekunden
+        public final long albumId;   // für Album-Cover-URI
+        public final long duration;
         public final Uri uri;
 
+        /** URI zum Album-Cover (aus dem MediaStore). Kann null ergeben wenn kein Cover vorhanden. */
+        public Uri getAlbumArtUri() {
+            if (albumId <= 0) return null;
+            return ContentUris.withAppendedId(
+                    Uri.parse("content://media/external/audio/albumart"), albumId);
+        }
+
         public TrackInfo(long id, String title, String artist, String album,
-                         long duration, Uri uri) {
+                         long albumId, long duration, Uri uri) {
             this.id = id;
             this.title = title;
             this.artist = artist;
             this.album = album;
+            this.albumId = albumId;
             this.duration = duration;
             this.uri = uri;
         }
@@ -90,6 +100,7 @@ public class TrackSelector {
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.ARTIST,
                 MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.ALBUM_ID,
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.DATA // Dateipfad für Ordner-Filterung
         };
@@ -118,6 +129,7 @@ public class TrackSelector {
                 int titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
                 int artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST);
                 int albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM);
+                int albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID);
                 int durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
 
                 while (cursor.moveToNext()) {
@@ -125,6 +137,7 @@ public class TrackSelector {
                     String title = cursor.getString(titleCol);
                     String artist = cursor.getString(artistCol);
                     String album = cursor.getString(albumCol);
+                    long albumId = cursor.getLong(albumIdCol);
                     long duration = cursor.getLong(durationCol);
                     Uri uri = Uri.withAppendedPath(collection, String.valueOf(id));
 
@@ -135,7 +148,7 @@ public class TrackSelector {
                         artist = "Unbekannt";
                     }
 
-                    cachedTracks.add(new TrackInfo(id, title, artist, album, duration, uri));
+                    cachedTracks.add(new TrackInfo(id, title, artist, album, albumId, duration, uri));
                 }
             }
         }

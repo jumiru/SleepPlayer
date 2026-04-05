@@ -7,7 +7,6 @@ import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
-import android.net.Uri;
 import android.os.Binder;
 import android.os.CountDownTimer;
 import android.os.IBinder;
@@ -21,6 +20,7 @@ import androidx.annotation.Nullable;
 import androidx.media.session.MediaButtonReceiver;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Foreground-Service für die Audio-Wiedergabe.
@@ -57,6 +57,7 @@ public class PlaybackService extends Service {
 
     private float currentVolume = 0.15f;
     private boolean isPlaying = false;
+    private boolean isRandomMode = true;
 
     // Fade-out Zustand
     private boolean isFadingOut = false;
@@ -115,6 +116,9 @@ public class PlaybackService extends Service {
         int savedProgress = prefsManager.getVolume();
         currentVolume = VolumeHelper.progressToVolume(savedProgress);
 
+        // Gespeicherten Wiedergabe-Modus laden
+        isRandomMode = prefsManager.isRandomMode();
+
         // Gespeicherte Timer-Dauer laden
         timerTotalMinutes = prefsManager.getTimerMinutes();
     }
@@ -163,19 +167,47 @@ public class PlaybackService extends Service {
     }
 
     /**
-     * Startet die Wiedergabe mit einem zufälligen Track.
+     * Spielt den nächsten Titel ab – zufällig oder aktuellen wiederholen,
+     * je nach aktuellem Modus.
      */
     public void startRandomPlayback() {
-        TrackSelector.TrackInfo track = trackSelector.getNextTrack();
-        if (track != null) {
-            playTrack(track);
+        if (isRandomMode) {
+            TrackSelector.TrackInfo track = trackSelector.getNextTrack();
+            if (track != null) {
+                playTrack(track);
+            }
+        } else {
+            repeatCurrentTrack();
         }
     }
 
     /**
-     * Spielt einen bestimmten Track ab.
+     * Wiederholt den aktuellen Track (Einzeltitel-Wiederholung).
+     * Falls noch kein Track gespielt wurde, startet einen zufälligen.
+     */
+    private void repeatCurrentTrack() {
+        if (currentTrack != null) {
+            playTrackInternal(currentTrack);
+        } else {
+            // Noch kein Track → zufällig starten
+            TrackSelector.TrackInfo track = trackSelector.getNextTrack();
+            if (track != null) {
+                playTrackInternal(track);
+            }
+        }
+    }
+
+    /**
+     * Spielt einen bestimmten Track ab (z.B. direkte Selektion aus der Liste).
      */
     public void playTrack(TrackSelector.TrackInfo track) {
+        playTrackInternal(track);
+    }
+
+    /**
+     * Interne Wiedergabe-Implementierung.
+     */
+    private void playTrackInternal(TrackSelector.TrackInfo track) {
         if (track == null) return;
 
         // Audio Focus anfordern
@@ -414,6 +446,20 @@ public class PlaybackService extends Service {
 
     public boolean isPlaying() {
         return isPlaying;
+    }
+
+    public boolean isRandomMode() {
+        return isRandomMode;
+    }
+
+    /**
+     * Setzt den Wiedergabe-Modus.
+     * @param random true = zufällig, false = in Listenreihenfolge
+     */
+    public void setRandomMode(boolean random) {
+        this.isRandomMode = random;
+        prefsManager.saveRandomMode(random);
+        Log.d(TAG, "Wiedergabe-Modus: " + (random ? "Zufall" : "Reihenfolge"));
     }
 
     public TrackSelector.TrackInfo getCurrentTrack() {

@@ -5,15 +5,22 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.database.ContentObserver;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
-import android.view.KeyEvent;
+import android.os.Looper;
+import android.provider.Settings;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -27,7 +34,9 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.material.button.MaterialButton;
+import com.google.android.material.materialswitch.MaterialSwitch;
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 
 import java.util.List;
 import java.util.Locale;
@@ -50,11 +59,19 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     /** Schrittweite pro Hardware-Lautstärketaste (bezogen auf SEEK_BAR_MAX = 200). */
     private static final int VOLUME_KEY_STEP = 4;
 
+    // System-Audio
+    private AudioManager audioManager;
+    private ContentObserver volumeObserver;
+    private int lastSystemVolume = -1;
+
     // Views
     private TextView tvTrackName;
     private TextView tvTrackArtist;
+    private ImageView ivAlbumArt;
     private ImageButton btnPlayPause;
     private ImageButton btnSkip;
+    private ImageButton btnSettings;
+    private MaterialSwitch switchRandom;
     private SeekBar seekVolume;
     private TextView tvVolumePercent;
     private TextView tvVolumeLabel;
@@ -62,9 +79,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private TextView tvTimerRemaining;
     private TextView tvTrackCount;
     private RecyclerView recyclerTracks;
-    private TextView tvFolderName;
-    private MaterialButton btnSelectFolder;
-    private MaterialButton btnClearFolder;
 
     // Service
     private PlaybackService playbackService;
@@ -126,10 +140,16 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         setContentView(R.layout.activity_main);
 
         prefsManager = new PrefsManager(this);
+        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+
+        // Lautstärketasten sollen den Medien-Stream steuern
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+
         initViews();
         setupVolumeControl();
         setupTimerSpinner();
-        setupFolderSelection();
+        setupRandomSwitch();
+        setupSettingsButton();
         setupTrackList();
         checkPermissions();
     }
@@ -140,6 +160,18 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         // An den Service binden (falls er läuft)
         Intent intent = new Intent(this, PlaybackService.class);
         bindService(intent, serviceConnection, 0);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        registerVolumeObserver();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        unregisterVolumeObserver();
     }
 
     @Override
@@ -155,35 +187,47 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     /**
-     * Fängt Hardware-Lautstärketasten ab und leitet sie an den App-eigenen
-     * logarithmischen Volume-Slider weiter.
-     * So bleibt die GUI immer aktuell und die feinen Schritte bleiben erhalten.
+     * ContentObserver für Systemlautstärke-Änderungen.
+     * Funktioniert auch wenn die MediaSession die Tasten abfängt.
+     * Erkennt die Richtung der Änderung und verschiebt den in-app Slider
+     * um VOLUME_KEY_STEP – so bleibt die logarithmische Feinregelung erhalten.
      */
-    @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        int keyCode = event.getKeyCode();
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            // Nur beim Drücken reagieren (nicht beim Loslassen)
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+    private void registerVolumeObserver() {
+        lastSystemVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        volumeObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override
+            public void onChange(boolean selfChange) {
+                int newSystemVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+                if (newSystemVolume == lastSystemVolume) return;
+
+                boolean volumeUp = newSystemVolume > lastSystemVolume;
+                lastSystemVolume = newSystemVolume;
+
                 int current = seekVolume.getProgress();
-                int next = (keyCode == KeyEvent.KEYCODE_VOLUME_UP)
+                int next = volumeUp
                         ? Math.min(VolumeHelper.SEEK_BAR_MAX, current + VOLUME_KEY_STEP)
                         : Math.max(0, current - VOLUME_KEY_STEP);
 
                 if (next != current) {
                     seekVolume.setProgress(next);
+                    updateVolumeLabel(next);
                     float volume = VolumeHelper.progressToVolume(next);
                     if (isBound && playbackService != null) {
                         playbackService.setVolume(volume);
                     }
-                    updateVolumeLabel(next);
                     prefsManager.saveVolume(next);
                 }
             }
-            // Event konsumieren → Systemlautstärke bleibt unverändert
-            return true;
+        };
+        getContentResolver().registerContentObserver(
+                Settings.System.CONTENT_URI, true, volumeObserver);
+    }
+
+    private void unregisterVolumeObserver() {
+        if (volumeObserver != null) {
+            getContentResolver().unregisterContentObserver(volumeObserver);
+            volumeObserver = null;
         }
-        return super.dispatchKeyEvent(event);
     }
 
     // ===== Initialisierung =====
@@ -191,8 +235,11 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private void initViews() {
         tvTrackName = findViewById(R.id.tvTrackName);
         tvTrackArtist = findViewById(R.id.tvTrackArtist);
+        ivAlbumArt = findViewById(R.id.ivAlbumArt);
         btnPlayPause = findViewById(R.id.btnPlayPause);
         btnSkip = findViewById(R.id.btnSkip);
+        btnSettings = findViewById(R.id.btnSettings);
+        switchRandom = findViewById(R.id.switchRandom);
         seekVolume = findViewById(R.id.seekVolume);
         tvVolumePercent = findViewById(R.id.tvVolumePercent);
         tvVolumeLabel = findViewById(R.id.tvVolumeLabel);
@@ -200,9 +247,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         tvTimerRemaining = findViewById(R.id.tvTimerRemaining);
         tvTrackCount = findViewById(R.id.tvTrackCount);
         recyclerTracks = findViewById(R.id.recyclerTracks);
-        tvFolderName = findViewById(R.id.tvFolderName);
-        btnSelectFolder = findViewById(R.id.btnSelectFolder);
-        btnClearFolder = findViewById(R.id.btnClearFolder);
 
         btnPlayPause.setOnClickListener(v -> onPlayPauseClicked());
         btnSkip.setOnClickListener(v -> onSkipClicked());
@@ -293,55 +337,69 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         });
     }
 
-    // ===== Ordner-Auswahl =====
+    private void setupRandomSwitch() {
+        // Gespeicherten Modus laden
+        boolean savedRandom = prefsManager.isRandomMode();
+        switchRandom.setChecked(savedRandom);
+        switchRandom.setText(savedRandom ? R.string.mode_random : R.string.mode_sequential);
 
-    private void setupFolderSelection() {
-        // Gespeicherten Ordner anzeigen
-        updateFolderDisplay();
-
-        btnSelectFolder.setOnClickListener(v -> {
-            // SAF Ordner-Picker öffnen
-            folderPickerLauncher.launch(null);
+        switchRandom.setOnCheckedChangeListener((button, isChecked) -> {
+            prefsManager.saveRandomMode(isChecked);
+            button.setText(isChecked ? R.string.mode_random : R.string.mode_sequential);
+            if (isBound && playbackService != null) {
+                playbackService.setRandomMode(isChecked);
+            }
         });
+    }
 
-        btnClearFolder.setOnClickListener(v -> {
-            // Ordner-Filter entfernen
-            prefsManager.clearFolder();
-            updateFolderDisplay();
-            loadTracks();
+    // ===== Settings-Button / Ordner-Auswahl =====
+
+    private void setupSettingsButton() {
+        btnSettings.setOnClickListener(v -> showSettingsMenu());
+    }
+
+    /**
+     * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen.
+     */
+    private void showSettingsMenu() {
+        PopupMenu popup = new PopupMenu(this, btnSettings);
+
+        // Aktuellen Ordner als erstes (deaktiviertes) Item anzeigen
+        String folderName = prefsManager.getFolderDisplayName();
+        String folderLabel = (folderName != null)
+                ? getString(R.string.settings_folder_title) + ": " + folderName
+                : getString(R.string.settings_folder_title) + ": " + getString(R.string.folder_all);
+        popup.getMenu().add(0, 0, 0, folderLabel).setEnabled(false);
+        popup.getMenu().add(0, 1, 1, getString(R.string.settings_folder_select));
+        popup.getMenu().add(0, 2, 2, getString(R.string.settings_folder_clear))
+                .setEnabled(folderName != null);
+
+        popup.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1:
+                    folderPickerLauncher.launch(null);
+                    return true;
+                case 2:
+                    prefsManager.clearFolder();
+                    loadTracks();
+                    Toast.makeText(this, R.string.folder_all, Toast.LENGTH_SHORT).show();
+                    return true;
+            }
+            return false;
         });
+        popup.show();
     }
 
     /**
      * Wird aufgerufen wenn der Benutzer einen Ordner ausgewählt hat.
      */
     private void onFolderSelected(Uri treeUri) {
-        // Anzeigenamen aus dem URI extrahieren
         String displayName = extractFolderDisplayName(treeUri);
-
-        // Speichern
         prefsManager.saveFolderUri(treeUri.toString());
         prefsManager.saveFolderDisplayName(displayName);
-
-        // UI aktualisieren
-        updateFolderDisplay();
-
-        // Track-Liste mit neuem Filter neu laden
         loadTracks();
-    }
-
-    /**
-     * Aktualisiert die Ordner-Anzeige im UI.
-     */
-    private void updateFolderDisplay() {
-        String displayName = prefsManager.getFolderDisplayName();
-        if (displayName != null) {
-            tvFolderName.setText(displayName);
-            btnClearFolder.setVisibility(View.VISIBLE);
-        } else {
-            tvFolderName.setText(R.string.folder_all);
-            btnClearFolder.setVisibility(View.GONE);
-        }
+        Toast.makeText(this, getString(R.string.settings_folder_title) + ": " + displayName,
+                Toast.LENGTH_SHORT).show();
     }
 
     /**
@@ -445,6 +503,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             if (track != null) {
                 tvTrackName.setText(track.title);
                 tvTrackArtist.setText(track.artist);
+                updateAlbumArt(track);
             }
         });
     }
@@ -483,11 +542,25 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         if (track != null) {
             tvTrackName.setText(track.title);
             tvTrackArtist.setText(track.artist);
+            updateAlbumArt(track);
         }
 
         // Play/Pause Button
         boolean playing = playbackService.isPlaying();
         btnPlayPause.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
+
+        // Random Switch mit Service-Zustand synchronisieren
+        boolean random = playbackService.isRandomMode();
+        switchRandom.setOnCheckedChangeListener(null); // Listener kurz deaktivieren
+        switchRandom.setChecked(random);
+        switchRandom.setText(random ? R.string.mode_random : R.string.mode_sequential);
+        switchRandom.setOnCheckedChangeListener((button, isChecked) -> {
+            prefsManager.saveRandomMode(isChecked);
+            button.setText(isChecked ? R.string.mode_random : R.string.mode_sequential);
+            if (isBound && playbackService != null) {
+                playbackService.setRandomMode(isChecked);
+            }
+        });
 
         // Timer
         if (playbackService.isTimerRunning()) {
@@ -504,6 +577,21 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         long minutes = totalSeconds / 60;
         long seconds = totalSeconds % 60;
         return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
+    }
+
+    /**
+     * Lädt das Album-Cover mit Glide.
+     * Zeigt den Platzhalter wenn kein Cover vorhanden oder das Laden fehlschlägt.
+     */
+    private void updateAlbumArt(TrackSelector.TrackInfo track) {
+        Uri artUri = track != null ? track.getAlbumArtUri() : null;
+        Glide.with(this)
+                .load(artUri)
+                .placeholder(R.drawable.ic_album_placeholder)
+                .error(R.drawable.ic_album_placeholder)
+                .transition(DrawableTransitionOptions.withCrossFade(300))
+                .centerCrop()
+                .into(ivAlbumArt);
     }
 }
 
