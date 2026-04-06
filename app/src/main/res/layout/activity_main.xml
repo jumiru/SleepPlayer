@@ -109,6 +109,45 @@
                         android:singleLine="true"
                         tools:text="Künstler" />
 
+                    <!-- Fortschrittsbalken + Zeitanzeige -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="4dp">
+
+                        <TextView
+                            android:id="@+id/tvCurrentPosition"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="10sp"
+                            android:textColor="#80FFFFFF"
+                            android:text="0:00"
+                            android:minWidth="28dp" />
+
+                        <SeekBar
+                            android:id="@+id/seekProgress"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:max="1000"
+                            android:progress="0"
+                            android:layout_marginStart="4dp"
+                            android:layout_marginEnd="4dp"
+                            android:thumb="@null" />
+
+                        <TextView
+                            android:id="@+id/tvTrackDurationLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="10sp"
+                            android:textColor="#80FFFFFF"
+                            android:text="0:00"
+                            android:minWidth="28dp"
+                            android:gravity="end" />
+                    </LinearLayout>
+
                     <!-- Play + Skip + Random Switch in einer Zeile -->
                     <LinearLayout
                         android:layout_width="match_parent"

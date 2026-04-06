@@ -86,6 +86,21 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private View overlayAlbumArt;
     private ImageView ivAlbumArtFull;
 
+    // Fortschrittsbalken
+    private SeekBar seekProgress;
+    private TextView tvCurrentPosition;
+    private TextView tvTrackDurationLabel;
+
+    /** Handler + Runnable für die sekündliche Fortschritts-Aktualisierung. */
+    private final Handler progressHandler = new Handler(Looper.getMainLooper());
+    private final Runnable progressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            updateProgress();
+            progressHandler.postDelayed(this, 500);
+        }
+    };
+
     // Service
     private PlaybackService playbackService;
     private boolean isBound = false;
@@ -194,12 +209,17 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     protected void onResume() {
         super.onResume();
         registerVolumeObserver();
+        // Fortschrittsbalken starten falls gerade abgespielt wird
+        if (isBound && playbackService != null && playbackService.isPlaying()) {
+            progressHandler.post(progressRunnable);
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         unregisterVolumeObserver();
+        progressHandler.removeCallbacks(progressRunnable);
     }
 
     @Override
@@ -278,6 +298,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         recyclerTracks = findViewById(R.id.recyclerTracks);
         overlayAlbumArt = findViewById(R.id.overlayAlbumArt);
         ivAlbumArtFull = findViewById(R.id.ivAlbumArtFull);
+        seekProgress = findViewById(R.id.seekProgress);
+        tvCurrentPosition = findViewById(R.id.tvCurrentPosition);
+        tvTrackDurationLabel = findViewById(R.id.tvTrackDurationLabel);
 
         btnPlayPause.setOnClickListener(v -> onPlayPauseClicked());
         btnSkip.setOnClickListener(v -> onSkipClicked());
@@ -287,6 +310,26 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
         // Klick irgendwo im Overlay → schließen
         overlayAlbumArt.setOnClickListener(v -> hideAlbumArtOverlay());
+
+        // Fortschrittsbalken: Nutzer kann Position manuell setzen
+        seekProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {}
+            @Override public void onStartTrackingTouch(SeekBar s) {
+                // Aktualisierung pausieren während der Nutzer zieht
+                progressHandler.removeCallbacks(progressRunnable);
+            }
+            @Override public void onStopTrackingTouch(SeekBar s) {
+                if (isBound && playbackService != null) {
+                    int duration = playbackService.getDuration();
+                    if (duration > 0) {
+                        int seekMs = (int) ((long) s.getProgress() * duration / 1000);
+                        playbackService.seekTo(seekMs);
+                    }
+                }
+                // Aktualisierung wieder starten
+                progressHandler.post(progressRunnable);
+            }
+        });
     }
 
     private void setupVolumeControl() {
@@ -551,6 +594,10 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 tvTrackArtist.setText(track.artist);
                 updateAlbumArt(track);
             }
+            // Fortschritt zurücksetzen bis die neue Position eintrifft
+            seekProgress.setProgress(0);
+            tvCurrentPosition.setText("0:00");
+            tvTrackDurationLabel.setText(formatMs(track != null ? track.duration : 0));
         });
     }
 
@@ -559,6 +606,11 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         runOnUiThread(() -> {
             btnPlayPause.setImageResource(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
             btnPlayPause.setContentDescription(getString(isPlaying ? R.string.pause : R.string.play));
+            if (isPlaying) {
+                progressHandler.post(progressRunnable);
+            } else {
+                progressHandler.removeCallbacks(progressRunnable);
+            }
         });
     }
 
@@ -617,6 +669,33 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     // ===== Hilfsmethoden =====
+
+    /** Aktualisiert Fortschrittsbalken und Zeitanzeigen. */
+    private void updateProgress() {
+        if (!isBound || playbackService == null) return;
+        int position = playbackService.getCurrentPosition(); // ms
+        int duration = playbackService.getDuration();        // ms
+        if (duration > 0) {
+            int progress = (int) ((long) position * 1000 / duration);
+            seekProgress.setProgress(progress);
+        } else {
+            seekProgress.setProgress(0);
+        }
+        tvCurrentPosition.setText(formatMs(position));
+        tvTrackDurationLabel.setText(formatMs(duration));
+    }
+
+    /** Formatiert Millisekunden als M:SS oder H:MM:SS. */
+    private String formatMs(long ms) {
+        long totalSeconds = ms / 1000;
+        long hours = totalSeconds / 3600;
+        long minutes = (totalSeconds % 3600) / 60;
+        long seconds = totalSeconds % 60;
+        if (hours > 0) {
+            return String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds);
+        }
+        return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
+    }
 
     private String formatTime(long millis) {
         long totalSeconds = millis / 1000;

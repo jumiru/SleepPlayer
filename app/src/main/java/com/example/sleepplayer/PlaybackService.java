@@ -561,6 +561,43 @@ public class PlaybackService extends Service {
         return currentTrack;
     }
 
+    /** Aktuelle Wiedergabeposition in Millisekunden (0 wenn kein Track). */
+    public int getCurrentPosition() {
+        if (mediaPlayer != null) {
+            try {
+                return mediaPlayer.getCurrentPosition();
+            } catch (IllegalStateException e) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    /** Gesamtdauer des aktuellen Tracks in Millisekunden (0 wenn kein Track). */
+    public int getDuration() {
+        if (mediaPlayer != null) {
+            try {
+                int d = mediaPlayer.getDuration();
+                return d > 0 ? d : 0;
+            } catch (IllegalStateException e) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    /** Springt zur angegebenen Position in Millisekunden. */
+    public void seekTo(int positionMs) {
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.seekTo(positionMs);
+                Log.d(TAG, "seekTo: " + positionMs + "ms");
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "seekTo: IllegalStateException", e);
+            }
+        }
+    }
+
     public long getTimerMillisRemaining() {
         return timerMillisRemaining;
     }
