@@ -9,7 +9,9 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Binder;
 import android.os.CountDownTimer;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -21,6 +23,8 @@ import androidx.media.session.MediaButtonReceiver;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Foreground-Service für die Audio-Wiedergabe.
@@ -42,6 +46,11 @@ public class PlaybackService extends Service {
 
     // Binder für Activity-Kommunikation
     private final IBinder binder = new LocalBinder();
+
+    /** Hintergrund-Thread für MediaStore-Abfragen (verhindert Main-Thread I/O / ANR). */
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    /** Handler zum Zurückwechseln auf den Main-Thread nach I/O. */
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private MediaPlayer mediaPlayer;
     private MediaSessionCompat mediaSession;
@@ -84,7 +93,7 @@ public class PlaybackService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "Service created");
+        Log.d(TAG, "Service created (instance=" + System.identityHashCode(this) + ")");
 
         prefsManager = new PrefsManager(this);
         trackSelector = new TrackSelector(this);
@@ -121,6 +130,13 @@ public class PlaybackService extends Service {
 
         // Gespeicherte Timer-Dauer laden
         timerTotalMinutes = prefsManager.getTimerMinutes();
+
+        // Track-Liste im Hintergrund vorladen, damit beim ersten Abspielen
+        // KEIN MediaStore-Query auf dem Main-Thread nötig ist (ANR-Prävention).
+        ioExecutor.execute(() -> {
+            List<TrackSelector.TrackInfo> tracks = trackSelector.getAllTracks();
+            Log.d(TAG, "Track-Cache vorgeladen: " + tracks.size() + " Titel");
+        });
     }
 
     @Override
@@ -149,7 +165,8 @@ public class PlaybackService extends Service {
 
     @Override
     public void onDestroy() {
-        Log.d(TAG, "Service destroyed");
+        Log.d(TAG, "Service destroyed (instance=" + System.identityHashCode(this) + ")");
+        ioExecutor.shutdownNow();
         stopTimerInternal();
         releaseMediaPlayer();
         if (mediaSession != null) {
@@ -169,13 +186,27 @@ public class PlaybackService extends Service {
     /**
      * Spielt den nächsten Titel ab – zufällig oder aktuellen wiederholen,
      * je nach aktuellem Modus.
+     *
+     * WICHTIG: Die MediaStore-Abfrage läuft auf einem Hintergrund-Thread,
+     * um ANR auf dem Main-Thread zu verhindern.
      */
     public void startRandomPlayback() {
+        Log.d(TAG, "startRandomPlayback() – isRandomMode=" + isRandomMode
+                + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null"));
         if (isRandomMode) {
-            TrackSelector.TrackInfo track = trackSelector.getNextTrack();
-            if (track != null) {
-                playTrack(track);
-            }
+            // Nächsten zufälligen Track im Hintergrund auswählen
+            ioExecutor.execute(() -> {
+                TrackSelector.TrackInfo track = trackSelector.getNextTrack();
+                Log.d(TAG, "Nächster Track ausgewählt: "
+                        + (track != null ? track.title : "keiner!"));
+                mainHandler.post(() -> {
+                    if (track != null) {
+                        playTrackInternal(track);
+                    } else {
+                        Log.w(TAG, "Keine Tracks verfügbar – Wiedergabe gestoppt");
+                    }
+                });
+            });
         } else {
             repeatCurrentTrack();
         }
@@ -187,13 +218,19 @@ public class PlaybackService extends Service {
      */
     private void repeatCurrentTrack() {
         if (currentTrack != null) {
+            Log.d(TAG, "repeatCurrentTrack: " + currentTrack.title);
             playTrackInternal(currentTrack);
         } else {
-            // Noch kein Track → zufällig starten
-            TrackSelector.TrackInfo track = trackSelector.getNextTrack();
-            if (track != null) {
-                playTrackInternal(track);
-            }
+            Log.d(TAG, "repeatCurrentTrack: kein aktueller Track – lade zufällig");
+            // Erster Start: wie zufällig, im Hintergrund laden
+            ioExecutor.execute(() -> {
+                TrackSelector.TrackInfo track = trackSelector.getNextTrack();
+                mainHandler.post(() -> {
+                    if (track != null) {
+                        playTrackInternal(track);
+                    }
+                });
+            });
         }
     }
 
@@ -206,32 +243,48 @@ public class PlaybackService extends Service {
 
     /**
      * Interne Wiedergabe-Implementierung.
+     *
+     * Verwendet eine lokale 'player'-Variable anstelle von 'mediaPlayer',
+     * um veraltete Callbacks (von einem bereits ersetzten MediaPlayer) sicher
+     * zu erkennen und zu ignorieren.
      */
     private void playTrackInternal(TrackSelector.TrackInfo track) {
-        if (track == null) return;
+        if (track == null) {
+            Log.w(TAG, "playTrackInternal: track ist null, abgebrochen");
+            return;
+        }
+        Log.d(TAG, "playTrackInternal: " + track.title + " / " + track.artist);
 
         // Audio Focus anfordern
         int result = audioManager.requestAudioFocus(audioFocusRequest);
         if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            Log.w(TAG, "Audio focus not granted");
+            Log.w(TAG, "Audio Focus nicht erhalten – Wiedergabe abgebrochen");
             return;
         }
 
-        // Alten Player stoppen
+        // Alten Player stoppen und freigeben
         releaseMediaPlayer();
 
         try {
-            mediaPlayer = new MediaPlayer();
-            mediaPlayer.setAudioAttributes(
+            MediaPlayer player = new MediaPlayer();
+            mediaPlayer = player; // sofort setzen, damit Stale-Check funktioniert
+
+            player.setAudioAttributes(
                     new AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
                             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                             .build());
-            mediaPlayer.setDataSource(this, track.uri);
-            mediaPlayer.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
-            mediaPlayer.setVolume(currentVolume, currentVolume);
+            player.setDataSource(this, track.uri);
+            player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
+            player.setVolume(currentVolume, currentVolume);
 
-            mediaPlayer.setOnPreparedListener(mp -> {
+            player.setOnPreparedListener(mp -> {
+                // Sicherheitscheck: Wurde dieser Player inzwischen ersetzt?
+                if (mediaPlayer != player) {
+                    Log.w(TAG, "onPrepared: Player wurde bereits ersetzt, ignoriere");
+                    return;
+                }
+                Log.d(TAG, "onPrepared: starte '" + track.title + "'");
                 mp.start();
                 isPlaying = true;
                 currentTrack = track;
@@ -247,29 +300,42 @@ public class PlaybackService extends Service {
 
                 // Timer starten falls noch nicht läuft
                 if (!isTimerRunning) {
+                    Log.d(TAG, "Timer noch nicht aktiv – starte Timer");
                     startTimer(timerTotalMinutes);
                 }
             });
 
-            mediaPlayer.setOnCompletionListener(mp -> {
-                // Track fertig → nächsten zufälligen abspielen
-                Log.d(TAG, "Track completed, playing next");
+            player.setOnCompletionListener(mp -> {
+                // Sicherheitscheck: Wurde dieser Player inzwischen ersetzt?
+                if (mediaPlayer != player) {
+                    Log.w(TAG, "onCompletion: Player wurde bereits ersetzt, ignoriere");
+                    return;
+                }
+                Log.d(TAG, "onCompletion: '" + track.title + "' fertig – nächster Track");
                 startRandomPlayback();
             });
 
-            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
-                Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
+            player.setOnErrorListener((mp, what, extra) -> {
+                Log.e(TAG, "MediaPlayer Fehler: what=" + what + " extra=" + extra
+                        + " track='" + track.title + "'");
+                if (mediaPlayer != player) {
+                    Log.w(TAG, "onError: Player wurde bereits ersetzt, ignoriere");
+                    return true;
+                }
                 // Bei Fehler: nächsten Track versuchen
                 startRandomPlayback();
                 return true;
             });
 
-            mediaPlayer.prepareAsync();
+            Log.d(TAG, "prepareAsync() gestartet für: " + track.title);
+            player.prepareAsync();
 
         } catch (IOException e) {
-            Log.e(TAG, "Error playing track", e);
+            Log.e(TAG, "IOException beim Laden: " + track.title, e);
             // Nächsten Track versuchen
             startRandomPlayback();
+        } catch (Exception e) {
+            Log.e(TAG, "Unerwarteter Fehler in playTrackInternal", e);
         }
     }
 
@@ -278,18 +344,22 @@ public class PlaybackService extends Service {
      * Startet auch den Timer neu.
      */
     public void togglePlayPause() {
+        Log.d(TAG, "togglePlayPause() – isPlaying=" + isPlaying
+                + ", hasPlayer=" + (mediaPlayer != null)
+                + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null"));
         if (isPlaying) {
             pausePlayback();
         } else {
             // Wenn noch kein Track geladen war, neuen starten
             if (mediaPlayer == null || currentTrack == null) {
                 startRandomPlayback();
-                // Timer wird in playTrack gestartet
+                // Timer wird in playTrackInternal/onPrepared gestartet,
+                // aber auch direkt hier sicherheitshalber:
+                restartTimer();
             } else {
                 resumePlayback();
+                restartTimer();
             }
-            // Timer neu starten bei jedem Play
-            restartTimer();
         }
     }
 
@@ -297,8 +367,15 @@ public class PlaybackService extends Service {
      * Pausiert die Wiedergabe.
      */
     public void pausePlayback() {
+        Log.d(TAG, "pausePlayback() – isPlaying=" + isPlaying);
         if (mediaPlayer != null && isPlaying) {
-            mediaPlayer.pause();
+            try {
+                mediaPlayer.pause();
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "IllegalStateException in pausePlayback()", e);
+                // Player in unerwartetem Zustand – freigeben
+                releaseMediaPlayer();
+            }
             isPlaying = false;
             updatePlaybackState(PlaybackStateCompat.STATE_PAUSED);
             showNotification();
@@ -313,12 +390,21 @@ public class PlaybackService extends Service {
      * Setzt die Wiedergabe fort.
      */
     public void resumePlayback() {
+        Log.d(TAG, "resumePlayback() – isPlaying=" + isPlaying
+                + ", hasPlayer=" + (mediaPlayer != null));
         if (mediaPlayer != null && !isPlaying) {
             // Audio Focus erneut anfordern
             int result = audioManager.requestAudioFocus(audioFocusRequest);
-            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return;
-
-            mediaPlayer.start();
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                Log.w(TAG, "Audio Focus nicht erhalten in resumePlayback()");
+                return;
+            }
+            try {
+                mediaPlayer.start();
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "IllegalStateException in resumePlayback()", e);
+                return;
+            }
             isPlaying = true;
             updatePlaybackState(PlaybackStateCompat.STATE_PLAYING);
             showNotification();
@@ -330,9 +416,10 @@ public class PlaybackService extends Service {
     }
 
     /**
-     * Stoppt die Wiedergabe vollständig.
+     * Stoppt die Wiedergabe vollständig und beendet den Service.
      */
     public void stopPlayback() {
+        Log.d(TAG, "stopPlayback()");
         stopTimerInternal();
         releaseMediaPlayer();
         isPlaying = false;
@@ -354,6 +441,7 @@ public class PlaybackService extends Service {
      * Springt zum nächsten zufälligen Track.
      */
     public void skipToNext() {
+        Log.d(TAG, "skipToNext()");
         startRandomPlayback();
     }
 
@@ -387,6 +475,8 @@ public class PlaybackService extends Service {
         isTimerRunning = true;
         isFadingOut = false; // Fade-out-Zustand zurücksetzen
 
+        Log.d(TAG, "Timer gestartet: " + minutes + " Minuten");
+
         sleepTimer = new CountDownTimer(millis, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
@@ -418,7 +508,7 @@ public class PlaybackService extends Service {
                 isTimerRunning = false;
                 timerMillisRemaining = 0;
                 isFadingOut = false;
-                Log.d(TAG, "Sleep timer beendet – Fade-out abgeschlossen");
+                Log.d(TAG, "Sleep-Timer abgelaufen – pausiere Wiedergabe");
 
                 // Wiedergabe pausieren (nicht komplett stoppen)
                 pausePlayback();
@@ -427,9 +517,14 @@ public class PlaybackService extends Service {
                     callback.onTimerFinished();
                 }
 
-                // Service stoppen
+                // Nur Foreground-Status entfernen – Service BLEIBT AM LEBEN,
+                // damit die MediaSession aktiv bleibt und die Kopfhörertaste
+                // weiterhin funktioniert (Wiedereinschlafen ohne Bildschirm).
+                // KEIN stopSelf() hier!
                 stopForeground(STOP_FOREGROUND_REMOVE);
-                stopSelf();
+
+                Log.d(TAG, "Service bleibt aktiv (kein stopSelf). "
+                        + "Kopfhörertaste kann Wiedergabe neu starten.");
             }
         };
         sleepTimer.start();
@@ -490,14 +585,19 @@ public class PlaybackService extends Service {
 
     private void releaseMediaPlayer() {
         if (mediaPlayer != null) {
+            Log.d(TAG, "releaseMediaPlayer()");
             try {
                 if (mediaPlayer.isPlaying()) {
                     mediaPlayer.stop();
                 }
             } catch (IllegalStateException e) {
-                // Ignore
+                Log.w(TAG, "IllegalStateException beim Stoppen des MediaPlayers", e);
             }
-            mediaPlayer.release();
+            try {
+                mediaPlayer.release();
+            } catch (Exception e) {
+                Log.w(TAG, "Fehler beim Release des MediaPlayers", e);
+            }
             mediaPlayer = null;
         }
     }
@@ -522,6 +622,7 @@ public class PlaybackService extends Service {
     }
 
     private void onAudioFocusChange(int focusChange) {
+        Log.d(TAG, "onAudioFocusChange: " + focusChange);
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_LOSS:
                 // Dauerhafter Verlust → pausieren

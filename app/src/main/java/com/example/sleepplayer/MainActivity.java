@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.StrictMode;
 import android.provider.Settings;
 import android.view.MenuItem;
 import android.view.View;
@@ -137,6 +138,16 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // StrictMode im Debug-Build: zeigt Main-Thread I/O sofort im Logcat
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder()
+                    .detectDiskReads()
+                    .detectDiskWrites()
+                    .penaltyLog()
+                    .build());
+        }
+
         setContentView(R.layout.activity_main);
 
         prefsManager = new PrefsManager(this);
