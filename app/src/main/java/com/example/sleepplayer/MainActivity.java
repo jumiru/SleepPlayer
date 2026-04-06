@@ -85,6 +85,12 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private PlaybackService playbackService;
     private boolean isBound = false;
 
+    /**
+     * Aktion die ausgeführt wird sobald der Service verbunden ist.
+     * Wird gesetzt wenn der Nutzer Play/Skip drückt bevor der Service bereit ist.
+     */
+    private Runnable pendingServiceAction = null;
+
     // Adapter
     private TrackAdapter trackAdapter;
 
@@ -126,6 +132,12 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
             // UI mit aktuellem Zustand synchronisieren
             syncUI();
+
+            // Ausstehende Aktion ausführen (z.B. Play-Druck während Service noch startete)
+            if (pendingServiceAction != null) {
+                pendingServiceAction.run();
+                pendingServiceAction = null;
+            }
         }
 
         @Override
@@ -188,6 +200,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     @Override
     protected void onStop() {
         super.onStop();
+        pendingServiceAction = null; // ausstehende Aktionen verwerfen
         if (isBound) {
             if (playbackService != null) {
                 playbackService.setCallback(null);
@@ -462,16 +475,20 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     private void loadTracks() {
-        TrackSelector selector = new TrackSelector(this);
-        selector.clearCache(); // Cache leeren damit Ordner-Filter greift
-        List<TrackSelector.TrackInfo> tracks = selector.getAllTracks();
-        trackAdapter.setTracks(tracks);
-        tvTrackCount.setText(String.format(Locale.getDefault(),
-                getString(R.string.tracks_found), tracks.size()));
-
-        if (tracks.isEmpty()) {
-            tvTrackName.setText(R.string.no_audio_files);
-        }
+        // MediaStore-Query im Hintergrund laden (kein Main-Thread I/O)
+        new Thread(() -> {
+            TrackSelector selector = new TrackSelector(this);
+            selector.clearCache();
+            List<TrackSelector.TrackInfo> tracks = selector.getAllTracks();
+            runOnUiThread(() -> {
+                trackAdapter.setTracks(tracks);
+                tvTrackCount.setText(String.format(Locale.getDefault(),
+                        getString(R.string.tracks_found), tracks.size()));
+                if (tracks.isEmpty()) {
+                    tvTrackName.setText(R.string.no_audio_files);
+                }
+            });
+        }, "LoadTracks").start();
     }
 
     // ===== Playback Controls =====
@@ -480,6 +497,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         ensureServiceStarted();
         if (isBound && playbackService != null) {
             playbackService.togglePlayPause();
+        } else {
+            // Service startet gerade async – Aktion merken und in onServiceConnected ausführen
+            pendingServiceAction = () -> playbackService.togglePlayPause();
         }
     }
 
@@ -487,6 +507,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         ensureServiceStarted();
         if (isBound && playbackService != null) {
             playbackService.skipToNext();
+        } else {
+            pendingServiceAction = () -> playbackService.skipToNext();
         }
     }
 
