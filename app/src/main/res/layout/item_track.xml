@@ -3,41 +3,61 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="12dp"
-    android:background="?attr/selectableItemBackground">
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="?attr/selectableItemBackground"
+    android:minHeight="56dp">
 
-    <TextView
-        android:id="@+id/tvItemTitle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="15sp"
-        android:textColor="#FFFFFFFF"
-        android:ellipsize="end"
-        android:maxLines="1" />
+    <!-- Album-Art Thumbnail -->
+    <ImageView
+        android:id="@+id/ivItemAlbumArt"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
 
+    <!-- Titel / Künstler / Dauer -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="2dp">
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
 
         <TextView
-            android:id="@+id/tvItemArtist"
-            android:layout_width="0dp"
+            android:id="@+id/tvItemTitle"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="12sp"
-            android:textColor="#99FFFFFF"
+            android:textSize="15sp"
+            android:textColor="#FFFFFFFF"
             android:ellipsize="end"
             android:maxLines="1" />
 
-        <TextView
-            android:id="@+id/tvItemDuration"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:textColor="#99FFFFFF" />
+            android:orientation="horizontal"
+            android:layout_marginTop="2dp">
+
+            <TextView
+                android:id="@+id/tvItemArtist"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="12sp"
+                android:textColor="#99FFFFFF"
+                android:ellipsize="end"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/tvItemDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#99FFFFFF" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
-

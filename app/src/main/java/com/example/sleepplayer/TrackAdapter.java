@@ -3,10 +3,14 @@ package com.example.sleepplayer;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +51,15 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHol
         holder.tvArtist.setText(track.artist);
         holder.tvDuration.setText(track.getFormattedDuration());
 
+        // Album-Art laden (Glide kümmert sich um Caching und Placeholder)
+        Glide.with(holder.itemView.getContext())
+                .load(track.getAlbumArtUri())
+                .placeholder(R.drawable.ic_album_placeholder)
+                .error(R.drawable.ic_album_placeholder)
+                .transition(DrawableTransitionOptions.withCrossFade(150))
+                .centerCrop()
+                .into(holder.ivAlbumArt);
+
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
                 listener.onTrackClick(track);
@@ -60,16 +73,17 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHol
     }
 
     static class TrackViewHolder extends RecyclerView.ViewHolder {
+        final ImageView ivAlbumArt;
         final TextView tvTitle;
         final TextView tvArtist;
         final TextView tvDuration;
 
         TrackViewHolder(@NonNull View itemView) {
             super(itemView);
+            ivAlbumArt = itemView.findViewById(R.id.ivItemAlbumArt);
             tvTitle = itemView.findViewById(R.id.tvItemTitle);
             tvArtist = itemView.findViewById(R.id.tvItemArtist);
             tvDuration = itemView.findViewById(R.id.tvItemDuration);
         }
     }
 }
-
