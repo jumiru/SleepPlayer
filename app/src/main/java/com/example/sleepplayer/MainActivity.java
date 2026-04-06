@@ -15,8 +15,9 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.StrictMode;
 import android.provider.Settings;
-import android.view.MenuItem;
 import android.view.View;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ImageButton;
@@ -80,6 +81,10 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private TextView tvTimerRemaining;
     private TextView tvTrackCount;
     private RecyclerView recyclerTracks;
+
+    // Vollbild-Overlay für Album Art
+    private View overlayAlbumArt;
+    private ImageView ivAlbumArtFull;
 
     // Service
     private PlaybackService playbackService;
@@ -271,9 +276,17 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         tvTimerRemaining = findViewById(R.id.tvTimerRemaining);
         tvTrackCount = findViewById(R.id.tvTrackCount);
         recyclerTracks = findViewById(R.id.recyclerTracks);
+        overlayAlbumArt = findViewById(R.id.overlayAlbumArt);
+        ivAlbumArtFull = findViewById(R.id.ivAlbumArtFull);
 
         btnPlayPause.setOnClickListener(v -> onPlayPauseClicked());
         btnSkip.setOnClickListener(v -> onSkipClicked());
+
+        // Klick auf kleines Album-Art → Vollbild-Overlay öffnen
+        ivAlbumArt.setOnClickListener(v -> showAlbumArtOverlay());
+
+        // Klick irgendwo im Overlay → schließen
+        overlayAlbumArt.setOnClickListener(v -> hideAlbumArtOverlay());
     }
 
     private void setupVolumeControl() {
@@ -625,6 +638,59 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 .transition(DrawableTransitionOptions.withCrossFade(300))
                 .centerCrop()
                 .into(ivAlbumArt);
+
+        // Overlay-Bild ebenfalls aktualisieren falls es gerade sichtbar ist
+        if (overlayAlbumArt.getVisibility() == View.VISIBLE) {
+            Glide.with(this)
+                    .load(artUri)
+                    .placeholder(R.drawable.ic_album_placeholder)
+                    .error(R.drawable.ic_album_placeholder)
+                    .into(ivAlbumArtFull);
+        }
+    }
+
+    // ===== Album-Art Vollbild-Overlay =====
+
+    private void showAlbumArtOverlay() {
+        // Aktuelles Bild in das Vollbild-View laden
+        TrackSelector.TrackInfo track = (isBound && playbackService != null)
+                ? playbackService.getCurrentTrack() : null;
+        Uri artUri = track != null ? track.getAlbumArtUri() : null;
+
+        Glide.with(this)
+                .load(artUri)
+                .placeholder(R.drawable.ic_album_placeholder)
+                .error(R.drawable.ic_album_placeholder)
+                .into(ivAlbumArtFull);
+
+        // Einblenden mit Fade-Animation
+        AlphaAnimation fadeIn = new AlphaAnimation(0f, 1f);
+        fadeIn.setDuration(200);
+        overlayAlbumArt.setVisibility(View.VISIBLE);
+        overlayAlbumArt.startAnimation(fadeIn);
+    }
+
+    private void hideAlbumArtOverlay() {
+        AlphaAnimation fadeOut = new AlphaAnimation(1f, 0f);
+        fadeOut.setDuration(200);
+        fadeOut.setAnimationListener(new Animation.AnimationListener() {
+            @Override public void onAnimationStart(Animation a) {}
+            @Override public void onAnimationRepeat(Animation a) {}
+            @Override public void onAnimationEnd(Animation a) {
+                overlayAlbumArt.setVisibility(View.GONE);
+            }
+        });
+        overlayAlbumArt.startAnimation(fadeOut);
+    }
+
+    /** Zurück-Taste schließt zuerst das Overlay (falls offen). */
+    @Override
+    public void onBackPressed() {
+        if (overlayAlbumArt != null && overlayAlbumArt.getVisibility() == View.VISIBLE) {
+            hideAlbumArtOverlay();
+        } else {
+            super.onBackPressed();
+        }
     }
 }
 
