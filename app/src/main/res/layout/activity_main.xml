@@ -156,6 +156,16 @@
                         android:gravity="center_vertical"
                         android:layout_marginTop="6dp">
 
+                        <!-- Zurück an Titelanfang -->
+                        <ImageButton
+                            android:id="@+id/btnRestartTrack"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:src="@drawable/ic_skip_previous"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="@string/restart_track"
+                            android:scaleType="fitCenter" />
+
                         <ImageButton
                             android:id="@+id/btnPlayPause"
                             android:layout_width="48dp"

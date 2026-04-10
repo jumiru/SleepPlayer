@@ -568,6 +568,16 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         }
     }
 
+    /** Setzt den aktuellen Titel auf Position 0 zurück (Anfang des Tracks). */
+    private void onRestartTrackClicked() {
+        ensureServiceStarted();
+        if (isBound && playbackService != null) {
+            playbackService.seekTo(0);
+        } else {
+            pendingServiceAction = () -> playbackService.seekTo(0);
+        }
+    }
+
     /**
      * Stellt sicher, dass der Service gestartet und gebunden ist.
      */

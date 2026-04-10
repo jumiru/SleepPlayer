@@ -7,6 +7,7 @@
     <string name="pause">Pause</string>
     <string name="stop">Stopp</string>
     <string name="next_track">Nächster Titel</string>
+    <string name="restart_track">An den Anfang</string>
     <string name="no_track">Kein Titel ausgewählt</string>
     <string name="now_playing">Spielt: %s</string>
     <string name="album_art_desc">Album-Cover</string>
