@@ -72,6 +72,17 @@ public class PlaybackService extends Service {
     private boolean isFadingOut = false;
     private float volumeBeforeFade = 0f;
 
+    /**
+     * WakeLock auf Service-Ebene – hält die CPU wach, damit der Service im
+     * Hintergrund nicht vom System in einen Zustand versetzt wird, in dem er
+     * keine Intents mehr empfangen kann.
+     *
+     * PARTIAL_WAKE_LOCK: CPU läuft, Bildschirm darf aus → batterieschonend.
+     * Wird bei echter Wiedergabe und im Schlafmodus (Timer abgelaufen, aber Service
+     * noch aktiv) gehalten; wird nur in stopPlayback() / onDestroy() freigegeben.
+     */
+    private PowerManager.WakeLock serviceWakeLock;
+
     private TrackSelector.TrackInfo currentTrack;
 
     // Callback-Interface für UI-Updates
@@ -101,6 +112,12 @@ public class PlaybackService extends Service {
 
         // Notification Channel erstellen
         NotificationHelper.createChannel(this);
+
+        // Service-WakeLock initialisieren (noch nicht acquiren)
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        serviceWakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK, "SleepPlayer:ServiceWakeLock");
+        serviceWakeLock.setReferenceCounted(false);
 
         // MediaSession erstellen
         mediaSession = new MediaSessionCompat(this, "SleepPlayer");
@@ -148,6 +165,10 @@ public class PlaybackService extends Service {
                 togglePlayPause();
             } else if (NotificationHelper.ACTION_STOP.equals(action)) {
                 stopPlayback();
+            } else if (NotificationHelper.ACTION_DISMISS.equals(action)) {
+                // Nutzer hat die Sleep-Mode-Notification weggewischt → Service vollständig beenden
+                Log.d(TAG, "ACTION_DISMISS empfangen – Service wird beendet");
+                stopPlayback();
             } else {
                 // Könnte ein MediaButton-Intent sein
                 MediaButtonReceiver.handleIntent(mediaSession, intent);
@@ -174,6 +195,7 @@ public class PlaybackService extends Service {
             mediaSession.release();
         }
         abandonAudioFocus();
+        releaseServiceWakeLock();
         super.onDestroy();
     }
 
@@ -261,6 +283,10 @@ public class PlaybackService extends Service {
             Log.w(TAG, "Audio Focus nicht erhalten – Wiedergabe abgebrochen");
             return;
         }
+
+        // Service-WakeLock halten – verhindert, dass der Service vom System
+        // "eingeschläfert" wird und keine Intents mehr empfangen kann
+        acquireServiceWakeLock();
 
         // Alten Player stoppen und freigeben
         releaseMediaPlayer();
@@ -425,6 +451,7 @@ public class PlaybackService extends Service {
         isPlaying = false;
         currentTrack = null;
         abandonAudioFocus();
+        releaseServiceWakeLock();
 
         updatePlaybackState(PlaybackStateCompat.STATE_STOPPED);
 
@@ -517,14 +544,16 @@ public class PlaybackService extends Service {
                     callback.onTimerFinished();
                 }
 
-                // Nur Foreground-Status entfernen – Service BLEIBT AM LEBEN,
-                // damit die MediaSession aktiv bleibt und die Kopfhörertaste
-                // weiterhin funktioniert (Wiedereinschlafen ohne Bildschirm).
-                // KEIN stopSelf() hier!
-                stopForeground(STOP_FOREGROUND_REMOVE);
+                // *** KRITISCH: Foreground-Status BEIBEHALTEN ***
+                // Statt stopForeground() zeigen wir eine spezielle "Schlafmodus"-Notification.
+                // Nur so bleibt der Service als Foreground-Service am Leben und die
+                // MediaSession empfängt weiterhin Kopfhörer-Tasten-Events – auch nach
+                // langer Pause (z.B. nachts beim Wiedereinschlafen).
+                // Der Nutzer kann die Notification wegwischen um den Service zu beenden.
+                showSleepModeNotification();
 
-                Log.d(TAG, "Service bleibt aktiv (kein stopSelf). "
-                        + "Kopfhörertaste kann Wiedergabe neu starten.");
+                Log.d(TAG, "Service bleibt im Foreground (Sleep-Mode-Notification). "
+                        + "Kopfhörertaste kann Wiedergabe jederzeit neu starten.");
             }
         };
         sleepTimer.start();
@@ -727,6 +756,36 @@ public class PlaybackService extends Service {
         Notification notification = NotificationHelper.buildNotification(
                 this, mediaSession, title, isPlaying);
         startForeground(NotificationHelper.NOTIFICATION_ID, notification);
+    }
+
+    /**
+     * Zeigt die "Schlafmodus"-Notification und hält den Service im Foreground.
+     * Wird aufgerufen wenn der Sleep-Timer abläuft und Wiedergabe pausiert wurde.
+     * Hält die MediaSession aktiv → Kopfhörer-Tasten weiterhin nutzbar.
+     */
+    private void showSleepModeNotification() {
+        String title = currentTrack != null ? currentTrack.title : "SleepPlayer";
+        Notification notification = NotificationHelper.buildSleepNotification(
+                this, mediaSession, title);
+        // startForeground() hält den Service als Foreground-Service am Leben
+        startForeground(NotificationHelper.NOTIFICATION_ID, notification);
+        Log.d(TAG, "Sleep-Mode-Notification aktiv – Service bleibt im Foreground");
+    }
+
+    /** Acquiriert den Service-WakeLock (idempotent). */
+    private void acquireServiceWakeLock() {
+        if (serviceWakeLock != null && !serviceWakeLock.isHeld()) {
+            serviceWakeLock.acquire();
+            Log.d(TAG, "Service-WakeLock acquired");
+        }
+    }
+
+    /** Gibt den Service-WakeLock frei (idempotent). */
+    private void releaseServiceWakeLock() {
+        if (serviceWakeLock != null && serviceWakeLock.isHeld()) {
+            serviceWakeLock.release();
+            Log.d(TAG, "Service-WakeLock released");
+        }
     }
 }
 
