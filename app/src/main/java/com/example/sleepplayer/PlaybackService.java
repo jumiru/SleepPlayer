@@ -85,6 +85,9 @@ public class PlaybackService extends Service {
 
     private TrackSelector.TrackInfo currentTrack;
 
+    /** Sprachsynthese für Zeitansage beim Timer-Start. */
+    private TtsHelper ttsHelper;
+
     // Callback-Interface für UI-Updates
     private PlaybackCallback callback;
 
@@ -147,6 +150,9 @@ public class PlaybackService extends Service {
 
         // Gespeicherte Timer-Dauer laden
         timerTotalMinutes = prefsManager.getTimerMinutes();
+
+        // TTS initialisieren (asynchron – bereit bevor der erste Timer gestartet wird)
+        ttsHelper = new TtsHelper(this);
 
         // Track-Liste im Hintergrund vorladen, damit beim ersten Abspielen
         // KEIN MediaStore-Query auf dem Main-Thread nötig ist (ANR-Prävention).
@@ -494,6 +500,7 @@ public class PlaybackService extends Service {
 
     /**
      * Setzt die Timer-Dauer und startet den Timer.
+     * Gibt beim Start die aktuelle Uhrzeit per Sprachsynthese aus.
      */
     public void startTimer(int minutes) {
         timerTotalMinutes = minutes;
@@ -507,6 +514,11 @@ public class PlaybackService extends Service {
         isFadingOut = false; // Fade-out-Zustand zurücksetzen
 
         Log.d(TAG, "Timer gestartet: " + minutes + " Minuten");
+
+        // Aktuelle Uhrzeit ansagen ("Es ist 22 Uhr 35")
+        if (ttsHelper != null) {
+            ttsHelper.speakCurrentTime();
+        }
 
         sleepTimer = new CountDownTimer(millis, 1000) {
             @Override
