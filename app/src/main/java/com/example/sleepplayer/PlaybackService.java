@@ -190,6 +190,10 @@ public class PlaybackService extends Service {
         ioExecutor.shutdownNow();
         stopTimerInternal();
         releaseMediaPlayer();
+        if (ttsHelper != null) {
+            ttsHelper.release();
+            ttsHelper = null;
+        }
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
