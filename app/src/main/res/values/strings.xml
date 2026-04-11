@@ -51,6 +51,11 @@
     <string name="folder_select">Ordner wählen</string>
     <string name="folder_clear">Zurücksetzen</string>
     <string name="folder_selected">Ordner: %s</string>
+
+    <!-- TTS setting -->
+    <string name="tts_enabled">Zeitansage beim Start</string>
+    <string name="tts_on">✅ Zeitansage: Ein</string>
+    <string name="tts_off">🔇 Zeitansage: Aus</string>
 </resources>
 
 

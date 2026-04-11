@@ -22,6 +22,7 @@ public class PrefsManager {
     private static final String KEY_FOLDER_URI = "folder_uri";
     private static final String KEY_FOLDER_DISPLAY = "folder_display_name";
     private static final String KEY_RANDOM_MODE = "random_mode";
+    private static final String KEY_TTS_ENABLED = "tts_enabled";
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -113,6 +114,18 @@ public class PrefsManager {
     /** Gibt zurück ob Zufallswiedergabe aktiv ist (Standard: true). */
     public boolean isRandomMode() {
         return prefs.getBoolean(KEY_RANDOM_MODE, true);
+    }
+
+    // --- Zeitansage (TTS) ---
+
+    /** Speichert ob die Zeitansage aktiviert ist. */
+    public void saveTtsEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_TTS_ENABLED, enabled).apply();
+    }
+
+    /** Gibt zurück ob die Zeitansage aktiviert ist (Standard: true). */
+    public boolean isTtsEnabled() {
+        return prefs.getBoolean(KEY_TTS_ENABLED, true);
     }
 
     // --- Zuletzt gespielte Titel ---

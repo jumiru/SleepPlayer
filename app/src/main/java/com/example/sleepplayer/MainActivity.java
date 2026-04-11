@@ -72,6 +72,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private ImageView ivAlbumArt;
     private ImageButton btnPlayPause;
     private ImageButton btnSkip;
+    private ImageButton btnRestartTrack;
     private ImageButton btnSettings;
     private MaterialSwitch switchRandom;
     private SeekBar seekVolume;
@@ -287,6 +288,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         ivAlbumArt = findViewById(R.id.ivAlbumArt);
         btnPlayPause = findViewById(R.id.btnPlayPause);
         btnSkip = findViewById(R.id.btnSkip);
+        btnRestartTrack = findViewById(R.id.btnRestartTrack);
         btnSettings = findViewById(R.id.btnSettings);
         switchRandom = findViewById(R.id.switchRandom);
         seekVolume = findViewById(R.id.seekVolume);
@@ -304,6 +306,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
         btnPlayPause.setOnClickListener(v -> onPlayPauseClicked());
         btnSkip.setOnClickListener(v -> onSkipClicked());
+        btnRestartTrack.setOnClickListener(v -> onRestartTrackClicked());
 
         // Klick auf kleines Album-Art → Vollbild-Overlay öffnen
         ivAlbumArt.setOnClickListener(v -> showAlbumArtOverlay());
@@ -413,6 +416,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             ensureServiceStarted();
             if (isBound && playbackService != null) {
                 playbackService.playTrack(track);
+            } else {
+                pendingServiceAction = () -> playbackService.playTrack(track);
             }
         });
     }
@@ -439,7 +444,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     /**
-     * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen.
+     * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen und TTS-Toggle.
      */
     private void showSettingsMenu() {
         PopupMenu popup = new PopupMenu(this, btnSettings);
@@ -454,6 +459,11 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         popup.getMenu().add(0, 2, 2, getString(R.string.settings_folder_clear))
                 .setEnabled(folderName != null);
 
+        // TTS-Toggle
+        boolean ttsEnabled = prefsManager.isTtsEnabled();
+        popup.getMenu().add(0, 3, 3,
+                ttsEnabled ? getString(R.string.tts_on) : getString(R.string.tts_off));
+
         popup.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case 1:
@@ -463,6 +473,13 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                     prefsManager.clearFolder();
                     loadTracks();
                     Toast.makeText(this, R.string.folder_all, Toast.LENGTH_SHORT).show();
+                    return true;
+                case 3:
+                    boolean newTts = !prefsManager.isTtsEnabled();
+                    prefsManager.saveTtsEnabled(newTts);
+                    Toast.makeText(this,
+                            newTts ? R.string.tts_on : R.string.tts_off,
+                            Toast.LENGTH_SHORT).show();
                     return true;
             }
             return false;

@@ -268,9 +268,15 @@ public class PlaybackService extends Service {
 
     /**
      * Spielt einen bestimmten Track ab (z.B. direkte Selektion aus der Liste).
+     * Wenn der Player gerade nicht läuft (neuer Start), wird zuerst die Uhrzeit angesagt.
+     * Wenn bereits ein Track läuft (Wechsel), startet der neue Track sofort ohne Ansage.
      */
     public void playTrack(TrackSelector.TrackInfo track) {
-        playTrackInternal(track);
+        if (!isPlaying) {
+            speakTimeAndThen(() -> playTrackInternal(track));
+        } else {
+            playTrackInternal(track);
+        }
     }
 
     /**
@@ -377,7 +383,8 @@ public class PlaybackService extends Service {
 
     /**
      * Toggle Play/Pause – wird von der Kopfhörer-Taste aufgerufen.
-     * Startet auch den Timer neu.
+     * Spricht zuerst die aktuelle Uhrzeit an (passend zur Track-Lautstärke),
+     * startet danach den Track bzw. setzt die Wiedergabe fort.
      */
     public void togglePlayPause() {
         Log.d(TAG, "togglePlayPause() – isPlaying=" + isPlaying
@@ -386,16 +393,33 @@ public class PlaybackService extends Service {
         if (isPlaying) {
             pausePlayback();
         } else {
-            // Wenn noch kein Track geladen war, neuen starten
             if (mediaPlayer == null || currentTrack == null) {
-                startRandomPlayback();
-                // Timer wird in playTrackInternal/onPrepared gestartet,
-                // aber auch direkt hier sicherheitshalber:
-                restartTimer();
+                // Neuer Start: TTS → dann Track laden
+                speakTimeAndThen(() -> {
+                    startRandomPlayback();
+                    // Timer startet in onPrepared falls noch nicht aktiv;
+                    // hier sicherheitshalber auch direkt (doppelt-sicher):
+                    if (!isTimerRunning) restartTimer();
+                });
             } else {
-                resumePlayback();
-                restartTimer();
+                // Fortsetzen nach Pause: TTS → dann resume
+                speakTimeAndThen(() -> {
+                    resumePlayback();
+                    restartTimer();
+                });
             }
+        }
+    }
+
+    /**
+     * Spricht die aktuelle Uhrzeit (mit Track-Lautstärke) und ruft danach {@code action} aus.
+     * Falls TTS deaktiviert oder nicht verfügbar, wird {@code action} sofort ausgeführt.
+     */
+    private void speakTimeAndThen(Runnable action) {
+        if (ttsHelper != null && prefsManager.isTtsEnabled()) {
+            ttsHelper.speakCurrentTime(currentVolume, action);
+        } else {
+            action.run();
         }
     }
 
@@ -515,10 +539,6 @@ public class PlaybackService extends Service {
 
         Log.d(TAG, "Timer gestartet: " + minutes + " Minuten");
 
-        // Aktuelle Uhrzeit ansagen ("Es ist 22 Uhr 35")
-        if (ttsHelper != null) {
-            ttsHelper.speakCurrentTime();
-        }
 
         sleepTimer = new CountDownTimer(millis, 1000) {
             @Override
