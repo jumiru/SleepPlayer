@@ -1,5 +1,6 @@
 package com.example.sleepplayer;
 
+import android.app.AlertDialog;
 import android.Manifest;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -26,6 +27,7 @@ import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -118,6 +120,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     // Prefs
     private PrefsManager prefsManager;
 
+    // Normalisierung
+    private NormalizationStore normalizationStore;
+
     // Permission Launcher
     private final ActivityResultLauncher<String> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
@@ -184,6 +189,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         setContentView(R.layout.activity_main);
 
         prefsManager = new PrefsManager(this);
+        normalizationStore = new NormalizationStore(this);
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
 
         // Lautstärketasten sollen den Medien-Stream steuern
@@ -409,6 +415,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
     private void setupTrackList() {
         trackAdapter = new TrackAdapter();
+        trackAdapter.setNormalizationStore(normalizationStore);
         recyclerTracks.setLayoutManager(new LinearLayoutManager(this));
         recyclerTracks.setAdapter(trackAdapter);
 
@@ -420,6 +427,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 pendingServiceAction = () -> playbackService.playTrack(track);
             }
         });
+
+        // Longpress → Referenz-Track setzen
+        trackAdapter.setOnTrackLongClickListener(track -> showReferenceTrackMenu(track));
     }
 
     private void setupRandomSwitch() {
@@ -444,7 +454,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     /**
-     * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen und TTS-Toggle.
+     * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen, TTS-Toggle und Normalisierung.
      */
     private void showSettingsMenu() {
         PopupMenu popup = new PopupMenu(this, btnSettings);
@@ -464,6 +474,22 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         popup.getMenu().add(0, 3, 3,
                 ttsEnabled ? getString(R.string.tts_on) : getString(R.string.tts_off));
 
+        // Normalisierung
+        popup.getMenu().add(0, 4, 4, getString(R.string.norm_menu_normalize))
+                .setEnabled(normalizationStore.hasReferenceTrack());
+        popup.getMenu().add(0, 5, 5, getString(R.string.norm_menu_reset))
+                .setEnabled(normalizationStore.hasReferenceTrack());
+
+        // Referenz-Info (deaktiviert, nur zur Info)
+        String refTitle = normalizationStore.getReferenceTrackTitle();
+        if (refTitle != null) {
+            popup.getMenu().add(0, 6, 6, "⭐ " + getString(R.string.norm_ref_label) + ": " + refTitle)
+                    .setEnabled(false);
+        } else {
+            popup.getMenu().add(0, 6, 6, getString(R.string.norm_ref_hint))
+                    .setEnabled(false);
+        }
+
         popup.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case 1:
@@ -481,10 +507,153 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                             newTts ? R.string.tts_on : R.string.tts_off,
                             Toast.LENGTH_SHORT).show();
                     return true;
+                case 4:
+                    startNormalization();
+                    return true;
+                case 5:
+                    normalizationStore.clearAll();
+                    trackAdapter.notifyDataSetChanged();
+                    Toast.makeText(this, R.string.norm_reset_done, Toast.LENGTH_SHORT).show();
+                    return true;
             }
             return false;
         });
         popup.show();
+    }
+
+    /**
+     * Zeigt ein Kontextmenü zum Setzen des Referenz-Tracks (nach Longpress).
+     */
+    private void showReferenceTrackMenu(TrackSelector.TrackInfo track) {
+        new AlertDialog.Builder(this)
+                .setTitle(track.title)
+                .setMessage(getString(R.string.norm_set_ref_msg))
+                .setPositiveButton(getString(R.string.norm_set_ref_confirm), (d, w) -> {
+                    normalizationStore.saveReferenceTrack(track.uri.toString(), track.title);
+                    trackAdapter.notifyDataSetChanged();
+                    Toast.makeText(this,
+                            getString(R.string.norm_ref_set, track.title),
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Startet die Normalisierungs-Analyse für alle Tracks im Hintergrund.
+     * Zeigt einen Fortschritts-Dialog und speichert die Gains danach.
+     */
+    private void startNormalization() {
+        // Track-Liste holen (bereits geladen im Adapter)
+        List<TrackSelector.TrackInfo> allTracks;
+        try {
+            // Tracks via TrackSelector neu laden (sicher, eigener Thread folgt)
+            TrackSelector selector = isBound && playbackService != null
+                    ? playbackService.getTrackSelector()
+                    : new TrackSelector(this);
+            allTracks = selector.getAllTracks();
+        } catch (Exception e) {
+            Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (allTracks.isEmpty()) {
+            Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String refUri = normalizationStore.getReferenceTrackUri();
+        if (refUri == null) {
+            Toast.makeText(this, R.string.norm_no_ref, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Fortschritts-Dialog aufbauen
+        ProgressBar progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setMax(allTracks.size());
+        progressBar.setProgress(0);
+        int padding = (int) (16 * getResources().getDisplayMetrics().density);
+        progressBar.setPadding(padding, padding, padding, padding);
+
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.norm_progress_title)
+                .setMessage(getString(R.string.norm_progress_msg, 0, allTracks.size()))
+                .setView(progressBar)
+                .setCancelable(false)
+                .create();
+        progressDialog.show();
+
+        // Analyse im Hintergrund
+        new Thread(() -> {
+            // 1) Referenz-RMS berechnen
+            TrackSelector.TrackInfo refTrack = null;
+            for (TrackSelector.TrackInfo t : allTracks) {
+                if (t.uri.toString().equals(refUri)) {
+                    refTrack = t;
+                    break;
+                }
+            }
+            if (refTrack == null) {
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    Toast.makeText(this, R.string.norm_ref_not_found, Toast.LENGTH_LONG).show();
+                });
+                return;
+            }
+
+            float refDb = AudioAnalyzer.analyzeRmsDb(this, refTrack.uri);
+            if (Float.isNaN(refDb)) {
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    Toast.makeText(this, R.string.norm_ref_analysis_failed, Toast.LENGTH_LONG).show();
+                });
+                return;
+            }
+
+            // 2) Alle anderen Tracks analysieren
+            int analyzed = 0;
+            int failed = 0;
+            final int total = allTracks.size();
+
+            for (TrackSelector.TrackInfo track : allTracks) {
+                analyzed++;
+                final int progress = analyzed;
+
+                runOnUiThread(() -> {
+                    progressBar.setProgress(progress);
+                    progressDialog.setMessage(
+                            getString(R.string.norm_progress_msg, progress, total));
+                });
+
+                String trackUri = track.uri.toString();
+                if (trackUri.equals(refUri)) {
+                    // Referenz selbst bekommt Gain 1.0
+                    normalizationStore.saveGain(trackUri, 1.0f);
+                    continue;
+                }
+
+                float trackDb = AudioAnalyzer.analyzeRmsDb(this, track.uri);
+                if (Float.isNaN(trackDb)) {
+                    failed++;
+                    android.util.Log.w("MainActivity", "Analyse fehlgeschlagen: " + track.title);
+                    continue;
+                }
+
+                float gain = NormalizationStore.computeGainMultiplier(refDb, trackDb);
+                normalizationStore.saveGain(trackUri, gain);
+            }
+
+            final int finalFailed = failed;
+            runOnUiThread(() -> {
+                progressDialog.dismiss();
+                trackAdapter.notifyDataSetChanged();
+                String msg = getString(R.string.norm_done, total - finalFailed, total);
+                if (finalFailed > 0) {
+                    msg += " (" + getString(R.string.norm_failed_count, finalFailed) + ")";
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            });
+
+        }, "NormalizationThread").start();
     }
 
     /**

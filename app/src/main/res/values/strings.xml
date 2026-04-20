@@ -56,6 +56,24 @@
     <string name="tts_enabled">Zeitansage beim Start</string>
     <string name="tts_on">✅ Zeitansage: Ein</string>
     <string name="tts_off">🔇 Zeitansage: Aus</string>
+
+    <!-- Normalization -->
+    <string name="norm_menu_normalize">🎚️ Tracks normalisieren…</string>
+    <string name="norm_menu_reset">🗑️ Normalisierung zurücksetzen</string>
+    <string name="norm_ref_label">Referenz</string>
+    <string name="norm_ref_hint">Longpress auf einen Track → Als Referenz markieren</string>
+    <string name="norm_set_ref_msg">Diesen Track als Referenz für die Lautstärke-Normalisierung festlegen?</string>
+    <string name="norm_set_ref_confirm">Als Referenz setzen</string>
+    <string name="norm_ref_set">⭐ Referenz: %s</string>
+    <string name="norm_no_ref">Bitte zuerst einen Referenz-Track per Longpress wählen.</string>
+    <string name="norm_no_tracks">Keine Tracks gefunden.</string>
+    <string name="norm_ref_not_found">Referenz-Track nicht in der Track-Liste gefunden.</string>
+    <string name="norm_ref_analysis_failed">Analyse des Referenz-Tracks fehlgeschlagen.</string>
+    <string name="norm_progress_title">Normalisierung läuft…</string>
+    <string name="norm_progress_msg">Analysiere Track %1$d / %2$d</string>
+    <string name="norm_done">✅ %1$d / %2$d Tracks normalisiert</string>
+    <string name="norm_failed_count">%d fehlgeschlagen</string>
+    <string name="norm_reset_done">Normalisierungs-Daten gelöscht</string>
 </resources>
 
 

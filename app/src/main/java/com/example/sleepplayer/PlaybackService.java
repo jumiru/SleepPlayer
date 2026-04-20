@@ -68,9 +68,31 @@ public class PlaybackService extends Service {
     private boolean isPlaying = false;
     private boolean isRandomMode = true;
 
+    /**
+     * Generations-Zähler zur Vermeidung von Race-Conditions beim asynchronen Track-Laden.
+     *
+     * Problem ohne diesen Zähler:
+     *   1. Track A läuft zu Ende → onCompletion → startRandomPlayback() startet IO-Thread
+     *   2. Nutzer wählt währenddessen Track B aus → playTrackInternal(B) läuft sofort
+     *   3. IO-Thread fertig → mainHandler.post(playTrackInternal(random)) → überschreibt B!
+     *
+     * Lösung: playTrackInternal() inkrementiert den Zähler. Der async-Callback prüft
+     * ob der Zähler noch passt; falls nicht, wird der veraltete Aufruf verworfen.
+     */
+    private int playbackGeneration = 0;
+
     // Fade-out Zustand
     private boolean isFadingOut = false;
     private float volumeBeforeFade = 0f;
+
+    /**
+     * Normalisierungs-Gain des aktuell spielenden Tracks (1.0 = keine Änderung).
+     * Wird in playTrackInternal() gesetzt.
+     */
+    private float currentTrackGain = 1.0f;
+
+    /** Normalisierungs-Daten (Referenz-Track + Gain-Offsets). */
+    private NormalizationStore normalizationStore;
 
     /**
      * WakeLock auf Service-Ebene – hält die CPU wach, damit der Service im
@@ -112,6 +134,7 @@ public class PlaybackService extends Service {
         prefsManager = new PrefsManager(this);
         trackSelector = new TrackSelector(this);
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        normalizationStore = new NormalizationStore(this);
 
         // Notification Channel erstellen
         NotificationHelper.createChannel(this);
@@ -226,12 +249,19 @@ public class PlaybackService extends Service {
         Log.d(TAG, "startRandomPlayback() – isRandomMode=" + isRandomMode
                 + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null"));
         if (isRandomMode) {
-            // Nächsten zufälligen Track im Hintergrund auswählen
+            // Generation zum Zeitpunkt dieses Aufrufs merken
+            final int generation = playbackGeneration;
             ioExecutor.execute(() -> {
                 TrackSelector.TrackInfo track = trackSelector.getNextTrack();
                 Log.d(TAG, "Nächster Track ausgewählt: "
                         + (track != null ? track.title : "keiner!"));
                 mainHandler.post(() -> {
+                    // Nur abspielen wenn kein direkter Track-Wechsel dazwischengekommen ist
+                    if (generation != playbackGeneration) {
+                        Log.d(TAG, "startRandomPlayback: Generation veraltet – abgebrochen "
+                                + "(war=" + generation + ", aktuell=" + playbackGeneration + ")");
+                        return;
+                    }
                     if (track != null) {
                         playTrackInternal(track);
                     } else {
@@ -254,10 +284,14 @@ public class PlaybackService extends Service {
             playTrackInternal(currentTrack);
         } else {
             Log.d(TAG, "repeatCurrentTrack: kein aktueller Track – lade zufällig");
-            // Erster Start: wie zufällig, im Hintergrund laden
+            final int generation = playbackGeneration;
             ioExecutor.execute(() -> {
                 TrackSelector.TrackInfo track = trackSelector.getNextTrack();
                 mainHandler.post(() -> {
+                    if (generation != playbackGeneration) {
+                        Log.d(TAG, "repeatCurrentTrack: Generation veraltet – abgebrochen");
+                        return;
+                    }
                     if (track != null) {
                         playTrackInternal(track);
                     }
@@ -291,7 +325,10 @@ public class PlaybackService extends Service {
             Log.w(TAG, "playTrackInternal: track ist null, abgebrochen");
             return;
         }
-        Log.d(TAG, "playTrackInternal: " + track.title + " / " + track.artist);
+        // Generation inkrementieren → macht alle laufenden async-Anfragen ungültig
+        playbackGeneration++;
+        Log.d(TAG, "playTrackInternal: " + track.title + " / " + track.artist
+                + " (generation=" + playbackGeneration + ")");
 
         // Audio Focus anfordern
         int result = audioManager.requestAudioFocus(audioFocusRequest);
@@ -307,6 +344,10 @@ public class PlaybackService extends Service {
         // Alten Player stoppen und freigeben
         releaseMediaPlayer();
 
+        // Normalisierungs-Gain für diesen Track laden
+        currentTrackGain = normalizationStore.getGain(track.uri.toString());
+        Log.d(TAG, "Track-Gain: " + currentTrackGain + "× für " + track.title);
+
         try {
             MediaPlayer player = new MediaPlayer();
             mediaPlayer = player; // sofort setzen, damit Stale-Check funktioniert
@@ -318,7 +359,7 @@ public class PlaybackService extends Service {
                             .build());
             player.setDataSource(this, track.uri);
             player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
-            player.setVolume(currentVolume, currentVolume);
+            player.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
 
             player.setOnPreparedListener(mp -> {
                 // Sicherheitscheck: Wurde dieser Player inzwischen ersetzt?
@@ -459,6 +500,8 @@ public class PlaybackService extends Service {
                 Log.w(TAG, "Audio Focus nicht erhalten in resumePlayback()");
                 return;
             }
+            // Lautstärke wiederherstellen – nach Fade-out ist sie nahe 0
+            mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
             try {
                 mediaPlayer.start();
             } catch (IllegalStateException e) {
@@ -518,7 +561,7 @@ public class PlaybackService extends Service {
             Log.d(TAG, "Fade-out abgebrochen durch manuellen Lautstärke-Eingriff");
         }
         if (mediaPlayer != null) {
-            mediaPlayer.setVolume(currentVolume, currentVolume);
+            mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
         }
     }
 
@@ -555,7 +598,7 @@ public class PlaybackService extends Service {
                 }
                 if (isFadingOut && volumeBeforeFade > 0f) {
                     float fadeFactor = (float) millisUntilFinished / FADE_OUT_DURATION_MS;
-                    float fadedVolume = volumeBeforeFade * fadeFactor;
+                    float fadedVolume = effectiveVolume(volumeBeforeFade * fadeFactor);
                     if (mediaPlayer != null) {
                         mediaPlayer.setVolume(fadedVolume, fadedVolume);
                     }
@@ -572,6 +615,12 @@ public class PlaybackService extends Service {
                 timerMillisRemaining = 0;
                 isFadingOut = false;
                 Log.d(TAG, "Sleep-Timer abgelaufen – pausiere Wiedergabe");
+
+                // Lautstärke wiederherstellen BEVOR pausiert wird,
+                // damit beim nächsten Resume nicht der Fade-out-Wert (~0) im Player steckt
+                if (mediaPlayer != null) {
+                    mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
+                }
 
                 // Wiedergabe pausieren (nicht komplett stoppen)
                 pausePlayback();
@@ -711,7 +760,7 @@ public class PlaybackService extends Service {
         }
         // Falls ein Fade-out lief, Lautstärke wiederherstellen
         if (isFadingOut && mediaPlayer != null) {
-            mediaPlayer.setVolume(currentVolume, currentVolume);
+            mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
         }
         isFadingOut = false;
         isTimerRunning = false;
@@ -737,13 +786,14 @@ public class PlaybackService extends Service {
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                 // Leiser machen
                 if (mediaPlayer != null) {
-                    mediaPlayer.setVolume(currentVolume * 0.3f, currentVolume * 0.3f);
+                    mediaPlayer.setVolume(effectiveVolume(currentVolume) * 0.3f,
+                            effectiveVolume(currentVolume) * 0.3f);
                 }
                 break;
             case AudioManager.AUDIOFOCUS_GAIN:
                 // Focus zurück → Lautstärke wiederherstellen
                 if (mediaPlayer != null) {
-                    mediaPlayer.setVolume(currentVolume, currentVolume);
+                    mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
                 }
                 // Nicht automatisch fortsetzen – Nutzer schläft vielleicht
                 break;
@@ -809,8 +859,7 @@ public class PlaybackService extends Service {
     }
 
     /** Acquiriert den Service-WakeLock (idempotent). */
-    private void acquireServiceWakeLock() {
-        if (serviceWakeLock != null && !serviceWakeLock.isHeld()) {
+    private void acquireServiceWakeLock() {        if (serviceWakeLock != null && !serviceWakeLock.isHeld()) {
             serviceWakeLock.acquire();
             Log.d(TAG, "Service-WakeLock acquired");
         }
@@ -822,6 +871,19 @@ public class PlaybackService extends Service {
             serviceWakeLock.release();
             Log.d(TAG, "Service-WakeLock released");
         }
+    }
+
+    /**
+     * Berechnet die effektive Lautstärke unter Berücksichtigung des Track-Gains.
+     * Ergebnis ist immer im Bereich [0.0, 1.0].
+     */
+    private float effectiveVolume(float base) {
+        return Math.max(0.0f, Math.min(1.0f, base * currentTrackGain));
+    }
+
+    /** Gibt den NormalizationStore zurück (für die Activity). */
+    public NormalizationStore getNormalizationStore() {
+        return normalizationStore;
     }
 }
 

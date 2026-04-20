@@ -58,6 +58,16 @@
                 android:layout_height="wrap_content"
                 android:textSize="12sp"
                 android:textColor="#99FFFFFF" />
+
+            <!-- Normalisierungs-Badge: zeigt Gain-Offset oder Referenz-Markierung -->
+            <TextView
+                android:id="@+id/tvItemNormBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
