@@ -74,6 +74,15 @@
     <string name="norm_done">✅ %1$d / %2$d Tracks normalisiert</string>
     <string name="norm_failed_count">%d fehlgeschlagen</string>
     <string name="norm_reset_done">Normalisierungs-Daten gelöscht</string>
+
+    <!-- Meditation (4-7-8 Atemübung) -->
+    <string name="meditation_start">🧘 Atemübung 4-7-8 starten</string>
+    <string name="meditation_stop">🧘 Atemübung beenden</string>
+    <string name="meditation_started">🧘 Atemübung gestartet – lang drücken zum Beenden</string>
+    <string name="meditation_ended">🧘 Atemübung beendet</string>
+    <string name="meditation_inhale">🫁 Einatmen … (Zyklus %d)</string>
+    <string name="meditation_hold">⏸ Halten …</string>
+    <string name="meditation_exhale">💨 Ausatmen …</string>
 </resources>
 
 

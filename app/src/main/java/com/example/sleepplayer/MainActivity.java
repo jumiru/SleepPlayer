@@ -490,6 +490,11 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                     .setEnabled(false);
         }
 
+        // Meditation (4-7-8 Atemübung)
+        boolean meditating = isBound && playbackService != null && playbackService.isMeditating();
+        popup.getMenu().add(0, 7, 7,
+                meditating ? getString(R.string.meditation_stop) : getString(R.string.meditation_start));
+
         popup.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case 1:
@@ -514,6 +519,14 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                     normalizationStore.clearAll();
                     trackAdapter.notifyDataSetChanged();
                     Toast.makeText(this, R.string.norm_reset_done, Toast.LENGTH_SHORT).show();
+                    return true;
+                case 7:
+                    if (isBound && playbackService != null) {
+                        playbackService.toggleMeditation();
+                    } else {
+                        ensureServiceStarted();
+                        pendingServiceAction = () -> playbackService.toggleMeditation();
+                    }
                     return true;
             }
             return false;
@@ -823,6 +836,33 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             tvTimerRemaining.setText(R.string.timer_off);
             btnPlayPause.setImageResource(R.drawable.ic_play);
             btnPlayPause.setContentDescription(getString(R.string.play));
+        });
+    }
+
+    @Override
+    public void onMeditationStateChanged(boolean active,
+                                         MeditationController.Phase phase, int cycle) {
+        runOnUiThread(() -> {
+            if (!active) {
+                Toast.makeText(this, R.string.meditation_ended, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String msg;
+            switch (phase) {
+                case INHALE:
+                    msg = getString(R.string.meditation_inhale, cycle);
+                    break;
+                case HOLD:
+                    msg = getString(R.string.meditation_hold);
+                    break;
+                case EXHALE:
+                    msg = getString(R.string.meditation_exhale);
+                    break;
+                default:
+                    msg = getString(R.string.meditation_started);
+            }
+            // Kurze Toast-Anzeige pro Phase (nicht aufdringlich)
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
         });
     }
 

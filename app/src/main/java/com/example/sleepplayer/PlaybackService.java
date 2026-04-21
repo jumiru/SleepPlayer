@@ -110,6 +110,9 @@ public class PlaybackService extends Service {
     /** Sprachsynthese für Zeitansage beim Timer-Start. */
     private TtsHelper ttsHelper;
 
+    /** Steuerung der 4-7-8 Atemübung. */
+    private MeditationController meditationController;
+
     // Callback-Interface für UI-Updates
     private PlaybackCallback callback;
 
@@ -118,6 +121,8 @@ public class PlaybackService extends Service {
         void onPlaybackStateChanged(boolean isPlaying);
         void onTimerTick(long millisRemaining);
         void onTimerFinished();
+        /** Wird aufgerufen wenn der Meditations-Modus ein-/ausgeschaltet wird. */
+        default void onMeditationStateChanged(boolean active, MeditationController.Phase phase, int cycle) {}
     }
 
     public class LocalBinder extends Binder {
@@ -135,6 +140,25 @@ public class PlaybackService extends Service {
         trackSelector = new TrackSelector(this);
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         normalizationStore = new NormalizationStore(this);
+
+        // Meditations-Controller initialisieren
+        meditationController = new MeditationController(new MeditationController.MeditationCallback() {
+            @Override
+            public void onPhaseChanged(MeditationController.Phase phase, int cycle) {
+                Log.d(TAG, "Meditation Phase: " + phase + " Zyklus " + cycle);
+                if (callback != null) {
+                    callback.onMeditationStateChanged(true, phase, cycle);
+                }
+            }
+            @Override
+            public void onMeditationFinished() {
+                Log.d(TAG, "Meditation beendet");
+                if (callback != null) {
+                    callback.onMeditationStateChanged(false,
+                            MeditationController.Phase.FINISHED, 0);
+                }
+            }
+        });
 
         // Notification Channel erstellen
         NotificationHelper.createChannel(this);
@@ -222,6 +246,10 @@ public class PlaybackService extends Service {
         if (ttsHelper != null) {
             ttsHelper.release();
             ttsHelper = null;
+        }
+        if (meditationController != null) {
+            meditationController.stop();
+            meditationController = null;
         }
         if (mediaSession != null) {
             mediaSession.setActive(false);
@@ -549,6 +577,53 @@ public class PlaybackService extends Service {
         startRandomPlayback();
     }
 
+    // ===== Meditation =====
+
+    /**
+     * Schaltet die 4-7-8 Atemübung ein oder aus.
+     * Beim Einschalten wird die Musikwiedergabe pausiert.
+     * Beim Ausschalten kehrt der Service in den normalen Schlafmodus zurück.
+     */
+    public void toggleMeditation() {
+        if (meditationController != null && meditationController.isRunning()) {
+            stopMeditation();
+        } else {
+            startMeditation();
+        }
+    }
+
+    /** Startet die Atemübung (pausiert laufende Wiedergabe). */
+    public void startMeditation() {
+        Log.d(TAG, "startMeditation()");
+        // Musik pausieren falls sie läuft
+        if (isPlaying) {
+            pausePlayback();
+        }
+        // Lautstärke: mindestens 20%, damit die Töne hörbar sind
+        float vol = Math.max(0.20f, currentVolume);
+        meditationController.start(vol);
+
+        // Notification aktualisieren
+        showMeditationNotification();
+    }
+
+    /** Stoppt die Atemübung. */
+    public void stopMeditation() {
+        Log.d(TAG, "stopMeditation()");
+        meditationController.stop();
+        if (callback != null) {
+            callback.onMeditationStateChanged(false,
+                    MeditationController.Phase.FINISHED, 0);
+        }
+        // Schlafmodus-Notification wiederherstellen
+        showSleepModeNotification();
+    }
+
+    /** Gibt zurück ob die Atemübung gerade läuft. */
+    public boolean isMeditating() {
+        return meditationController != null && meditationController.isRunning();
+    }
+
     /**
      * Setzt die Lautstärke (0.0 bis 1.0).
      * Wird der Wert manuell geändert, wird ein laufender Fade-out abgebrochen.
@@ -845,8 +920,7 @@ public class PlaybackService extends Service {
     }
 
     /**
-     * Zeigt die "Schlafmodus"-Notification und hält den Service im Foreground.
-     * Wird aufgerufen wenn der Sleep-Timer abläuft und Wiedergabe pausiert wurde.
+     * Zeigt die "Schlafmodus"-Notification und hält den Service im Foreground.     * Wird aufgerufen wenn der Sleep-Timer abläuft und Wiedergabe pausiert wurde.
      * Hält die MediaSession aktiv → Kopfhörer-Tasten weiterhin nutzbar.
      */
     private void showSleepModeNotification() {
@@ -856,6 +930,17 @@ public class PlaybackService extends Service {
         // startForeground() hält den Service als Foreground-Service am Leben
         startForeground(NotificationHelper.NOTIFICATION_ID, notification);
         Log.d(TAG, "Sleep-Mode-Notification aktiv – Service bleibt im Foreground");
+    }
+
+    /**
+     * Zeigt die Meditations-Notification und hält den Service im Foreground.
+     */
+    private void showMeditationNotification() {
+        Notification notification = NotificationHelper.buildMeditationNotification(
+                this, mediaSession,
+                "Einatmen 4s · Halten 7s · Ausatmen 8s · Lang-Druck = Ende");
+        startForeground(NotificationHelper.NOTIFICATION_ID, notification);
+        Log.d(TAG, "Meditations-Notification aktiv");
     }
 
     /** Acquiriert den Service-WakeLock (idempotent). */

@@ -147,5 +147,39 @@ public class NotificationHelper {
                         .setShowActionsInCompactView(0))
                 .build();
     }
+
+    /**
+     * Baut die Meditations-Notification für die 4-7-8 Atemübung.
+     * Hält den Foreground-Service am Leben; langer Druck auf Kopfhörer-Taste stoppt die Übung.
+     */
+    public static Notification buildMeditationNotification(Context context,
+                                                            MediaSessionCompat session,
+                                                            String phaseText) {
+        Intent openIntent = new Intent(context, MainActivity.class);
+        openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent contentIntent = PendingIntent.getActivity(
+                context, 0, openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Intent stopIntent = new Intent(context, PlaybackService.class);
+        stopIntent.setAction(ACTION_STOP);
+        PendingIntent stopPending = PendingIntent.getService(
+                context, 2, stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        return new NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle("🧘 Atemübung 4-7-8")
+                .setContentText(phaseText != null ? phaseText
+                        : "Langer Druck auf Kopfhörertaste zum Beenden")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentIntent(contentIntent)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .addAction(R.drawable.ic_notification, "Beenden", stopPending)
+                .setStyle(new MediaStyle()
+                        .setMediaSession(session.getSessionToken()))
+                .build();
+    }
 }
 
