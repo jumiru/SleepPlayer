@@ -170,6 +170,14 @@ public class TtsHelper implements TextToSpeech.OnInitListener {
 
     // ===== Intern =====
 
+    /**
+     * Maximale Zeit in ms, die wir auf den TTS-onDone-Callback warten.
+     * Danach wird der Callback erzwungen, damit die Musik auf jeden Fall startet.
+     * Hintergrund: Die TTS-Engine kann nach langer Schlafpause intern "einfrieren"
+     * und onDone nie auslösen – ohne diesen Fallback würde die Musik nie starten.
+     */
+    private static final long TTS_TIMEOUT_MS = 5000L;
+
     private void speakNow(String text, float volume, Runnable onDone) {
         // Vorherigen Callback ersetzen (falls TTS unterbrochen wird)
         onDoneCallback = onDone;
@@ -181,7 +189,21 @@ public class TtsHelper implements TextToSpeech.OnInitListener {
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, ttsVolume);
 
         // QUEUE_FLUSH: unterbricht ggf. laufende Ansage
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID);
+        int result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID);
+        if (result == TextToSpeech.ERROR) {
+            Log.w(TAG, "tts.speak() hat sofort ERROR zurückgegeben – feuere onDone sofort");
+            fireOnDone();
+            return;
+        }
+
+        // Sicherheits-Timeout: Falls die TTS-Engine onDone nie aufruft
+        // (z.B. nach langer Geräteschlafphase), starten wir die Musik trotzdem.
+        mainHandler.postDelayed(() -> {
+            if (onDoneCallback != null) {
+                Log.w(TAG, "TTS-Timeout nach " + TTS_TIMEOUT_MS + "ms – feuere onDone als Fallback");
+                fireOnDone();
+            }
+        }, TTS_TIMEOUT_MS);
     }
 
     /** Löst den gespeicherten onDone-Callback auf dem Main-Thread aus (einmalig). */
