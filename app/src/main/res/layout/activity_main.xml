@@ -304,6 +304,19 @@
                     android:textSize="13sp"
                     android:textColor="@color/white"
                     android:layout_marginStart="10dp" />
+
+                <!-- Meditations-Button (4-7-8 Atemübung) -->
+                <ImageButton
+                    android:id="@+id/btnMeditation"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="8dp"
+                    android:src="@drawable/ic_meditation"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/meditation_start"
+                    android:scaleType="fitCenter"
+                    android:alpha="0.6" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

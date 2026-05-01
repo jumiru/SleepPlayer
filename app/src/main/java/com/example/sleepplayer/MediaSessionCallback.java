@@ -10,27 +10,39 @@ import android.view.ViewConfiguration;
 /**
  * Callback für MediaSession – verarbeitet Kopfhörer-Tasten-Events.
  *
- * Kurzer Klick (< LongPressTimeout):  Play/Pause umschalten + Timer neu starten
- * Langer Druck (≥ LongPressTimeout):  Meditation ein-/ausschalten
+ * Einfacher Klick:   Play/Pause umschalten
+ * Doppelklick:       Meditation ein-/ausschalten
+ * Langer Druck:      Meditation ein-/ausschalten (als Alternative)
  */
 public class MediaSessionCallback extends MediaSessionCompat.Callback {
 
+    /** Maximaler Abstand zwischen zwei Klicks für Doppelklick-Erkennung (ms). */
+    private static final long DOUBLE_CLICK_WINDOW_MS = 400;
+
     private final PlaybackService service;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private boolean longPressFired = false;
 
-    /**
-     * Runnable das nach LongPressTimeout feuert → Meditation umschalten.
-     * Wird bei ACTION_UP abgebrochen, falls der Finger früh wieder losgelassen wird.
-     * Initialisiert im Konstruktor damit 'service' sicher gesetzt ist.
-     */
+    // Langdruck-Zustand
+    private boolean longPressFired = false;
     private final Runnable longPressRunnable;
+
+    // Doppelklick-Zustand
+    private boolean pendingSingleClick = false;
+    private final Runnable singleClickRunnable;
 
     public MediaSessionCallback(PlaybackService service) {
         this.service = service;
+
+        // Langdruck → Meditation (als Fallback behalten)
         this.longPressRunnable = () -> {
             longPressFired = true;
             service.toggleMeditation();
+        };
+
+        // Einfacher Klick (nach Ablauf des Doppelklick-Fensters) → Play/Pause
+        this.singleClickRunnable = () -> {
+            pendingSingleClick = false;
+            service.togglePlayPause();
         };
     }
 
@@ -78,8 +90,17 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
             } else if (keyEvent.getAction() == KeyEvent.ACTION_UP) {
                 handler.removeCallbacks(longPressRunnable);
                 if (!longPressFired) {
-                    // Kurzer Klick → Play/Pause
-                    service.togglePlayPause();
+                    // Kurzer Klick: Doppelklick-Erkennung
+                    if (pendingSingleClick) {
+                        // Zweiter Klick innerhalb des Fensters → Doppelklick → Meditation
+                        handler.removeCallbacks(singleClickRunnable);
+                        pendingSingleClick = false;
+                        service.toggleMeditation();
+                    } else {
+                        // Erster Klick: warten ob ein zweiter kommt
+                        pendingSingleClick = true;
+                        handler.postDelayed(singleClickRunnable, DOUBLE_CLICK_WINDOW_MS);
+                    }
                 }
                 return true;
             }
@@ -102,3 +123,4 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
         return super.onMediaButtonEvent(mediaButtonEvent);
     }
 }
+

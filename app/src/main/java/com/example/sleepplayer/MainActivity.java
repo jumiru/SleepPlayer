@@ -82,6 +82,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private TextView tvVolumeLabel;
     private Spinner spinnerTimer;
     private TextView tvTimerRemaining;
+    private ImageButton btnMeditation;
     private TextView tvTrackCount;
     private RecyclerView recyclerTracks;
 
@@ -302,6 +303,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         tvVolumeLabel = findViewById(R.id.tvVolumeLabel);
         spinnerTimer = findViewById(R.id.spinnerTimer);
         tvTimerRemaining = findViewById(R.id.tvTimerRemaining);
+        btnMeditation = findViewById(R.id.btnMeditation);
         tvTrackCount = findViewById(R.id.tvTrackCount);
         recyclerTracks = findViewById(R.id.recyclerTracks);
         overlayAlbumArt = findViewById(R.id.overlayAlbumArt);
@@ -313,6 +315,16 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         btnPlayPause.setOnClickListener(v -> onPlayPauseClicked());
         btnSkip.setOnClickListener(v -> onSkipClicked());
         btnRestartTrack.setOnClickListener(v -> onRestartTrackClicked());
+
+        // Meditations-Button: togglet die 4-7-8 Atemübung (wie Doppelklick am Kopfhörer)
+        btnMeditation.setOnClickListener(v -> {
+            ensureServiceStarted();
+            if (isBound && playbackService != null) {
+                playbackService.toggleMeditation();
+            } else {
+                pendingServiceAction = () -> playbackService.toggleMeditation();
+            }
+        });
 
         // Klick auf kleines Album-Art → Vollbild-Overlay öffnen
         ivAlbumArt.setOnClickListener(v -> showAlbumArtOverlay());
@@ -474,11 +486,12 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         popup.getMenu().add(0, 3, 3,
                 ttsEnabled ? getString(R.string.tts_on) : getString(R.string.tts_off));
 
-        // Normalisierung
+        // Normalisierung – "Normalisieren" immer aktiv (zeigt eigene Hinweise wenn nötig),
+        // "Zurücksetzen" nur aktiv wenn überhaupt Gain-Daten vorhanden
         popup.getMenu().add(0, 4, 4, getString(R.string.norm_menu_normalize))
-                .setEnabled(normalizationStore.hasReferenceTrack());
+                .setEnabled(true);
         popup.getMenu().add(0, 5, 5, getString(R.string.norm_menu_reset))
-                .setEnabled(normalizationStore.hasReferenceTrack());
+                .setEnabled(!normalizationStore.getAllGains().isEmpty());
 
         // Referenz-Info (deaktiviert, nur zur Info)
         String refTitle = normalizationStore.getReferenceTrackTitle();
@@ -489,11 +502,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             popup.getMenu().add(0, 6, 6, getString(R.string.norm_ref_hint))
                     .setEnabled(false);
         }
-
-        // Meditation (4-7-8 Atemübung)
-        boolean meditating = isBound && playbackService != null && playbackService.isMeditating();
-        popup.getMenu().add(0, 7, 7,
-                meditating ? getString(R.string.meditation_stop) : getString(R.string.meditation_start));
 
         popup.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -516,17 +524,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                     startNormalization();
                     return true;
                 case 5:
-                    normalizationStore.clearAll();
+                    normalizationStore.clearGains();   // Nur Gains löschen, Referenz-Track bleibt erhalten
                     trackAdapter.notifyDataSetChanged();
                     Toast.makeText(this, R.string.norm_reset_done, Toast.LENGTH_SHORT).show();
-                    return true;
-                case 7:
-                    if (isBound && playbackService != null) {
-                        playbackService.toggleMeditation();
-                    } else {
-                        ensureServiceStarted();
-                        pendingServiceAction = () -> playbackService.toggleMeditation();
-                    }
                     return true;
             }
             return false;
@@ -535,21 +535,245 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     /**
-     * Zeigt ein Kontextmenü zum Setzen des Referenz-Tracks (nach Longpress).
+     * Zeigt ein Kontextmenü zum Setzen des Referenz-Tracks und Normalisierungsoptionen (nach Longpress).
      */
     private void showReferenceTrackMenu(TrackSelector.TrackInfo track) {
+        boolean hasSectional = normalizationStore.hasSectionalGains(track.uri.toString());
+        java.util.List<String> items = new java.util.ArrayList<>();
+        items.add(getString(R.string.norm_set_ref_confirm));
+        items.add(getString(R.string.norm_single_track));
+        items.add(getString(R.string.norm_sectional));
+        if (hasSectional) {
+            items.add(getString(R.string.norm_sectional_visualize));
+            items.add(getString(R.string.norm_sectional_clear));
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle(track.title)
-                .setMessage(getString(R.string.norm_set_ref_msg))
-                .setPositiveButton(getString(R.string.norm_set_ref_confirm), (d, w) -> {
-                    normalizationStore.saveReferenceTrack(track.uri.toString(), track.title);
-                    trackAdapter.notifyDataSetChanged();
-                    Toast.makeText(this,
-                            getString(R.string.norm_ref_set, track.title),
-                            Toast.LENGTH_SHORT).show();
+                .setItems(items.toArray(new String[0]), (d, which) -> {
+                    String chosen = items.get(which);
+                    if (chosen.equals(getString(R.string.norm_set_ref_confirm))) {
+                        normalizationStore.saveReferenceTrack(track.uri.toString(), track.title);
+                        trackAdapter.notifyDataSetChanged();
+                        Toast.makeText(this, getString(R.string.norm_ref_set, track.title), Toast.LENGTH_SHORT).show();
+                    } else if (chosen.equals(getString(R.string.norm_single_track))) {
+                        startSingleTrackNormalization(track);
+                    } else if (chosen.equals(getString(R.string.norm_sectional))) {
+                        startSectionalNormalization(track);
+                    } else if (chosen.equals(getString(R.string.norm_sectional_visualize))) {
+                        showSectionalGainChart(track);
+                    } else if (chosen.equals(getString(R.string.norm_sectional_clear))) {
+                        normalizationStore.clearSectionalGains(track.uri.toString());
+                        trackAdapter.notifyDataSetChanged();
+                        Toast.makeText(this, getString(R.string.norm_reset_done), Toast.LENGTH_SHORT).show();
+                    }
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    /**
+     * Zeigt ein Diagramm der sektionsweisen Gain-Anpassungen für einen Track.
+     * Grüne Balken = leise Stellen werden angehoben, orange = laute werden gedämpft.
+     * Eine pinke Linie zeigt die aktuelle Wiedergabeposition (falls dieser Track spielt).
+     */
+    private void showSectionalGainChart(TrackSelector.TrackInfo track) {
+        java.util.List<float[]> sections = normalizationStore.getSectionalGains(track.uri.toString());
+        if (sections == null || sections.isEmpty()) {
+            Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        SectionalGainChartView chartView = new SectionalGainChartView(this);
+        chartView.setSections(sections);
+
+        // Aktuelle Wiedergabeposition eintragen, falls dieser Track gerade spielt
+        if (isBound && playbackService != null && playbackService.getCurrentTrack() != null
+                && playbackService.getCurrentTrack().uri.toString().equals(track.uri.toString())) {
+            chartView.setCurrentPosition(playbackService.getCurrentPosition());
+        }
+
+        // Höhe: 260dp
+        int heightPx = (int)(260 * getResources().getDisplayMetrics().density);
+        chartView.setMinimumHeight(heightPx);
+
+        // Zusammenfassung unter dem Diagramm
+        int boostCount = 0, cutCount = 0, neutralCount = 0;
+        float maxBoostDb = 0f, maxCutDb = 0f;
+        for (float[] s : sections) {
+            float db = (float)(20.0 * Math.log10(Math.max(1e-6, s[1])));
+            if (db > 0.5f) { boostCount++; maxBoostDb = Math.max(maxBoostDb, db); }
+            else if (db < -0.5f) { cutCount++; maxCutDb = Math.max(maxCutDb, -db); }
+            else neutralCount++;
+        }
+        String summary = String.format(Locale.getDefault(),
+                "%d Sektionen  •  ▲ %d angehoben (max +%.1fdB)  •  ▼ %d gedämpft (max −%.1fdB)  •  %d neutral",
+                sections.size(), boostCount, maxBoostDb, cutCount, maxCutDb, neutralCount);
+
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        layout.addView(chartView);
+
+        TextView summaryView = new TextView(this);
+        summaryView.setText(summary);
+        summaryView.setTextColor(0xFF90A4AE);
+        summaryView.setTextSize(11f);
+        int pad = (int)(12 * getResources().getDisplayMetrics().density);
+        summaryView.setPadding(pad, pad/2, pad, pad);
+        layout.addView(summaryView);
+
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.norm_sectional_chart_title) + "\n" + track.title)
+                .setView(layout)
+                .setPositiveButton(android.R.string.ok, null)
+                // "Neu analysieren" Shortcut
+                .setNeutralButton(getString(R.string.norm_sectional), (d, w) -> startSectionalNormalization(track))
+                .show();
+    }
+
+    /**
+     * Normalisiert einen einzelnen Track gegen den Referenz-Track.
+     */
+    private void startSingleTrackNormalization(TrackSelector.TrackInfo track) {
+        String refUri = normalizationStore.getReferenceTrackUri();
+        if (refUri == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.norm_menu_normalize))
+                    .setMessage(getString(R.string.norm_no_ref))
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+
+        // Fortschritts-Dialog
+        android.widget.ProgressBar pb = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        pb.setMax(100);
+        int pad = (int)(16 * getResources().getDisplayMetrics().density);
+        pb.setPadding(pad, pad, pad, pad);
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(R.string.norm_progress_title)
+                .setMessage(track.title)
+                .setView(pb)
+                .setCancelable(false)
+                .create();
+        dlg.show();
+
+        new Thread(() -> {
+            // Referenz-RMS
+            float refDb = Float.NaN;
+            if (track.uri.toString().equals(refUri)) {
+                refDb = AudioAnalyzer.analyzeRmsDb(this, track.uri, p -> runOnUiThread(() -> pb.setProgress(p)));
+            } else {
+                // Analyse der Referenz (schnell, nur 60s)
+                TrackSelector selector = isBound && playbackService != null
+                        ? playbackService.getTrackSelector() : new TrackSelector(this);
+                for (TrackSelector.TrackInfo t : selector.getAllTracks()) {
+                    if (t.uri.toString().equals(refUri)) {
+                        refDb = AudioAnalyzer.analyzeRmsDb(this, t.uri);
+                        break;
+                    }
+                }
+                if (Float.isNaN(refDb)) {
+                    runOnUiThread(() -> { dlg.dismiss();
+                        Toast.makeText(this, R.string.norm_ref_analysis_failed, Toast.LENGTH_LONG).show(); });
+                    return;
+                }
+                float trackDb = AudioAnalyzer.analyzeRmsDb(this, track.uri,
+                        p -> runOnUiThread(() -> pb.setProgress(p)));
+                if (Float.isNaN(trackDb)) {
+                    runOnUiThread(() -> { dlg.dismiss();
+                        Toast.makeText(this, R.string.norm_track_analysis_failed, Toast.LENGTH_LONG).show(); });
+                    return;
+                }
+                float gain = NormalizationStore.computeGainMultiplier(refDb, trackDb);
+                normalizationStore.saveGain(track.uri.toString(), gain);
+                String gainStr = String.format(java.util.Locale.getDefault(), "%.2f", gain);
+                runOnUiThread(() -> { dlg.dismiss(); trackAdapter.notifyDataSetChanged();
+                    Toast.makeText(this, getString(R.string.norm_single_done, gainStr), Toast.LENGTH_LONG).show(); });
+                return;
+            }
+            // Track ist selbst der Referenz-Track → Gain 1.0
+            normalizationStore.saveGain(track.uri.toString(), 1.0f);
+            runOnUiThread(() -> { dlg.dismiss(); trackAdapter.notifyDataSetChanged();
+                Toast.makeText(this, getString(R.string.norm_single_done, "1.00"), Toast.LENGTH_SHORT).show(); });
+        }, "SingleNormThread").start();
+    }
+
+    /**
+     * Sektionsweise Normalisierung für einen einzelnen Track.
+     * Analysiert den Track in 30-Sekunden-Abschnitten und speichert pro Abschnitt einen Gain.
+     */
+    private void startSectionalNormalization(TrackSelector.TrackInfo track) {
+        String refUri = normalizationStore.getReferenceTrackUri();
+        if (refUri == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.norm_menu_normalize))
+                    .setMessage(getString(R.string.norm_no_ref))
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+
+        android.widget.ProgressBar pb = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        pb.setMax(100);
+        int pad = (int)(16 * getResources().getDisplayMetrics().density);
+        pb.setPadding(pad, pad, pad, pad);
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(R.string.norm_sectional_title)
+                .setMessage(track.title)
+                .setView(pb)
+                .setCancelable(false)
+                .create();
+        dlg.show();
+
+        new Thread(() -> {
+            // Referenz-RMS (Gesamtlevel als Ziel)
+            float refDb = Float.NaN;
+            TrackSelector selector = isBound && playbackService != null
+                    ? playbackService.getTrackSelector() : new TrackSelector(this);
+            for (TrackSelector.TrackInfo t : selector.getAllTracks()) {
+                if (t.uri.toString().equals(refUri)) {
+                    refDb = AudioAnalyzer.analyzeRmsDb(this, t.uri);
+                    break;
+                }
+            }
+            if (Float.isNaN(refDb)) {
+                final float finalRefDb = refDb;
+                runOnUiThread(() -> { dlg.dismiss();
+                    Toast.makeText(this, R.string.norm_ref_analysis_failed, Toast.LENGTH_LONG).show(); });
+                return;
+            }
+
+            final float targetDb = refDb;
+            // Sektionsweise Analyse des Tracks (30-Sekunden-Fenster)
+            java.util.List<float[]> sections = AudioAnalyzer.analyzeSectionsDb(
+                    this, track.uri, 30_000,
+                    p -> runOnUiThread(() -> pb.setProgress(p)));
+
+            if (sections.isEmpty()) {
+                runOnUiThread(() -> { dlg.dismiss();
+                    Toast.makeText(this, R.string.norm_track_analysis_failed, Toast.LENGTH_LONG).show(); });
+                return;
+            }
+
+            // Für jede Sektion Gain berechnen: [startMs, gainMul]
+            java.util.List<float[]> sectionalGains = new java.util.ArrayList<>();
+            for (float[] s : sections) {
+                float sectionDb = s[1];
+                float gain = Float.isNaN(sectionDb) || sectionDb <= -99f
+                        ? 1.0f
+                        : NormalizationStore.computeGainMultiplier(targetDb, sectionDb);
+                // Auf ±18 dB begrenzen
+                float maxMul = (float) Math.pow(10, NormalizationStore.MAX_GAIN_DB / 20f);
+                gain = Math.max(1f / maxMul, Math.min(maxMul, gain));
+                sectionalGains.add(new float[]{s[0], gain});
+            }
+
+            normalizationStore.saveSectionalGains(track.uri.toString(), sectionalGains);
+            final int count = sectionalGains.size();
+            runOnUiThread(() -> { dlg.dismiss(); trackAdapter.notifyDataSetChanged();
+                Toast.makeText(this, getString(R.string.norm_sectional_done, count), Toast.LENGTH_LONG).show(); });
+        }, "SectionalNormThread").start();
     }
 
     /**
@@ -576,7 +800,12 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
         String refUri = normalizationStore.getReferenceTrackUri();
         if (refUri == null) {
-            Toast.makeText(this, R.string.norm_no_ref, Toast.LENGTH_SHORT).show();
+            // Kein Referenz-Track → erklärenden Dialog zeigen
+            new AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.norm_menu_normalize))
+                    .setMessage(getString(R.string.norm_no_ref))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
             return;
         }
 
@@ -741,6 +970,20 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                         getString(R.string.tracks_found), tracks.size()));
                 if (tracks.isEmpty()) {
                     tvTrackName.setText(R.string.no_audio_files);
+                } else {
+                    // Zufälligen Track vorauswählen und im UI anzeigen,
+                    // falls gerade nichts spielt – so sieht der Nutzer sofort
+                    // welcher Track beim ersten Play-Druck gestartet wird.
+                    boolean nothingPlaying = !isBound
+                            || playbackService == null
+                            || playbackService.getCurrentTrack() == null;
+                    if (nothingPlaying) {
+                        int idx = (int) (Math.random() * tracks.size());
+                        TrackSelector.TrackInfo preselected = tracks.get(idx);
+                        tvTrackName.setText(preselected.title);
+                        tvTrackArtist.setText(preselected.artist);
+                        updateAlbumArt(preselected);
+                    }
                 }
             });
         }, "LoadTracks").start();
@@ -841,28 +1084,21 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
     @Override
     public void onMeditationStateChanged(boolean active,
-                                         MeditationController.Phase phase, int cycle) {
+            MeditationController.Phase phase, int cycle) {
         runOnUiThread(() -> {
-            if (!active) {
-                Toast.makeText(this, R.string.meditation_ended, Toast.LENGTH_SHORT).show();
-                return;
+            if (active) {
+                // Meditation aktiv: voll sichtbar + türkis eingefärbt
+                btnMeditation.setAlpha(1.0f);
+                btnMeditation.setColorFilter(
+                        ContextCompat.getColor(this, R.color.teal_200),
+                        android.graphics.PorterDuff.Mode.SRC_IN);
+            } else {
+                // Meditation inaktiv: gedimmt + keine Färbung
+                btnMeditation.setAlpha(0.6f);
+                btnMeditation.clearColorFilter();
             }
-            String msg;
-            switch (phase) {
-                case INHALE:
-                    msg = getString(R.string.meditation_inhale, cycle);
-                    break;
-                case HOLD:
-                    msg = getString(R.string.meditation_hold);
-                    break;
-                case EXHALE:
-                    msg = getString(R.string.meditation_exhale);
-                    break;
-                default:
-                    msg = getString(R.string.meditation_started);
-            }
-            // Kurze Toast-Anzeige pro Phase (nicht aufdringlich)
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            btnMeditation.setContentDescription(
+                    getString(active ? R.string.meditation_stop : R.string.meditation_start));
         });
     }
 

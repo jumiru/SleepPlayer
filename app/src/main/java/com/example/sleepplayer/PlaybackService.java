@@ -23,8 +23,7 @@ import androidx.media.session.MediaButtonReceiver;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;import java.util.concurrent.Executors;
 
 /**
  * Foreground-Service für die Audio-Wiedergabe.
@@ -90,6 +89,24 @@ public class PlaybackService extends Service {
      * Wird in playTrackInternal() gesetzt.
      */
     private float currentTrackGain = 1.0f;
+
+    /**
+     * Sektionsweise Gain-Daten für den aktuellen Track.
+     * float[2] = [sectionStartMs, gainMultiplier]. null = keine Sektionsdaten.
+     */
+    private List<float[]> currentSectionalGains = null;
+
+    /** Handler-Runnable zum periodischen Anpassen des Sektions-Gains. */
+    private static final int SECTIONAL_GAIN_INTERVAL_MS = 2000;
+    private final Runnable sectionalGainRunnable = new Runnable() {
+        @Override
+        public void run() {
+            applySectionalGain();
+            if (isPlaying && currentSectionalGains != null) {
+                mainHandler.postDelayed(this, SECTIONAL_GAIN_INTERVAL_MS);
+            }
+        }
+    };
 
     /** Normalisierungs-Daten (Referenz-Track + Gain-Offsets). */
     private NormalizationStore normalizationStore;
@@ -157,6 +174,8 @@ public class PlaybackService extends Service {
                     callback.onMeditationStateChanged(false,
                             MeditationController.Phase.FINISHED, 0);
                 }
+                // Automatisch zurück in den normalen Schlafmodus wechseln
+                showSleepModeNotification();
             }
         });
 
@@ -169,13 +188,25 @@ public class PlaybackService extends Service {
                 PowerManager.PARTIAL_WAKE_LOCK, "SleepPlayer:ServiceWakeLock");
         serviceWakeLock.setReferenceCounted(false);
 
-        // MediaSession erstellen
+        // MediaSession erstellen (MUSS vor startForeground() stehen!)
         mediaSession = new MediaSessionCompat(this, "SleepPlayer");
         mediaSession.setCallback(new MediaSessionCallback(this));
         mediaSession.setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
                         | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         mediaSession.setActive(true);
+
+        // Initialen PlaybackState setzen – ohne diesen ignoriert Android
+        // die MediaSession beim allerersten Kopfhörer-Tastendruck
+        updatePlaybackState(PlaybackStateCompat.STATE_STOPPED);
+
+        // Sofort als Foreground-Service starten – stellt sicher dass die MediaSession
+        // von Anfang an Kopfhörer-Tasten empfängt, auch beim allerersten App-Start
+        // ohne vorherigen Track. Der Service bleibt so immer erreichbar.
+        // WICHTIG: erst NACH mediaSession-Initialisierung aufrufen!
+        Notification initialNotification = NotificationHelper.buildNotification(
+                this, mediaSession, getString(R.string.app_name), false);
+        startForeground(NotificationHelper.NOTIFICATION_ID, initialNotification);
 
         // Audio Focus Request
         AudioAttributes audioAttributes = new AudioAttributes.Builder()
@@ -374,7 +405,11 @@ public class PlaybackService extends Service {
 
         // Normalisierungs-Gain für diesen Track laden
         currentTrackGain = normalizationStore.getGain(track.uri.toString());
-        Log.d(TAG, "Track-Gain: " + currentTrackGain + "× für " + track.title);
+        // Sektionsweise Gains laden (null wenn nicht vorhanden)
+        currentSectionalGains = normalizationStore.getSectionalGains(track.uri.toString());
+        mainHandler.removeCallbacks(sectionalGainRunnable);
+        Log.d(TAG, "Track-Gain: " + currentTrackGain + "× für " + track.title
+                + (currentSectionalGains != null ? " (" + currentSectionalGains.size() + " Sektionen)" : ""));
 
         try {
             MediaPlayer player = new MediaPlayer();
@@ -407,6 +442,11 @@ public class PlaybackService extends Service {
                 if (callback != null) {
                     callback.onTrackChanged(track);
                     callback.onPlaybackStateChanged(true);
+                }
+
+                // Sektions-Gain-Handler starten falls Sektionsdaten vorhanden
+                if (currentSectionalGains != null) {
+                    mainHandler.postDelayed(sectionalGainRunnable, SECTIONAL_GAIN_INTERVAL_MS);
                 }
 
                 // Timer starten falls noch nicht läuft
@@ -459,6 +499,14 @@ public class PlaybackService extends Service {
         Log.d(TAG, "togglePlayPause() – isPlaying=" + isPlaying
                 + ", hasPlayer=" + (mediaPlayer != null)
                 + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null"));
+
+        // Wenn Meditation läuft → Pause = Meditation beenden, zurück in Schlafmodus
+        if (isMeditating()) {
+            Log.d(TAG, "togglePlayPause: Meditation läuft → stoppe Meditation");
+            stopMeditation();
+            return;
+        }
+
         if (isPlaying) {
             pausePlayback();
         } else {
@@ -540,6 +588,12 @@ public class PlaybackService extends Service {
             updatePlaybackState(PlaybackStateCompat.STATE_PLAYING);
             showNotification();
 
+            // Sektions-Gain-Handler neu starten falls Sektionsdaten vorhanden
+            if (currentSectionalGains != null) {
+                mainHandler.removeCallbacks(sectionalGainRunnable);
+                mainHandler.postDelayed(sectionalGainRunnable, SECTIONAL_GAIN_INTERVAL_MS);
+            }
+
             if (callback != null) {
                 callback.onPlaybackStateChanged(true);
             }
@@ -595,12 +649,18 @@ public class PlaybackService extends Service {
     /** Startet die Atemübung (pausiert laufende Wiedergabe). */
     public void startMeditation() {
         Log.d(TAG, "startMeditation()");
-        // Musik pausieren falls sie läuft
+
+        // Sleep-Timer stoppen – darf während Meditation nicht die Notification überschreiben
+        stopTimerInternal();
+
+        // Musik anhalten und Audio-Focus freigeben, damit Meditations-Töne ungestört spielen
         if (isPlaying) {
             pausePlayback();
         }
-        // Lautstärke: mindestens 20%, damit die Töne hörbar sind
-        float vol = Math.max(0.20f, currentVolume);
+        abandonAudioFocus();
+
+        // Lautstärke: mindestens 30%, damit die Töne deutlich hörbar sind
+        float vol = Math.max(0.30f, currentVolume);
         meditationController.start(vol);
 
         // Notification aktualisieren
@@ -810,6 +870,7 @@ public class PlaybackService extends Service {
     // ===== Private Hilfsmethoden =====
 
     private void releaseMediaPlayer() {
+        mainHandler.removeCallbacks(sectionalGainRunnable);
         if (mediaPlayer != null) {
             Log.d(TAG, "releaseMediaPlayer()");
             try {
@@ -938,7 +999,7 @@ public class PlaybackService extends Service {
     private void showMeditationNotification() {
         Notification notification = NotificationHelper.buildMeditationNotification(
                 this, mediaSession,
-                "Einatmen 4s · Halten 7s · Ausatmen 8s · Lang-Druck = Ende");
+                "Einatmen 4s · Halten 7s · Ausatmen 8s · Doppelklick = Ende");
         startForeground(NotificationHelper.NOTIFICATION_ID, notification);
         Log.d(TAG, "Meditations-Notification aktiv");
     }
@@ -964,6 +1025,40 @@ public class PlaybackService extends Service {
      */
     private float effectiveVolume(float base) {
         return Math.max(0.0f, Math.min(1.0f, base * currentTrackGain));
+    }
+
+    /**
+     * Liest die aktuelle Sektions-Gain und wendet sie auf den MediaPlayer an.
+     * Wird periodisch durch sectionalGainRunnable aufgerufen.
+     */
+    private void applySectionalGain() {
+        if (currentSectionalGains == null || mediaPlayer == null || !isPlaying) return;
+        try {
+            int posMs = mediaPlayer.getCurrentPosition();
+            float sectionGain = findSectionGain(posMs);
+            float vol = Math.max(0f, Math.min(1f, currentVolume * sectionGain));
+            mediaPlayer.setVolume(vol, vol);
+            Log.d(TAG, "Sektions-Gain bei " + posMs + "ms: " + sectionGain + "×");
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "applySectionalGain: IllegalStateException", e);
+        }
+    }
+
+    /**
+     * Findet den passenden Sektions-Gain-Multiplier für eine gegebene Position.
+     * Die Sektionen sind nach Startzeit sortiert gespeichert.
+     */
+    private float findSectionGain(int positionMs) {
+        if (currentSectionalGains == null || currentSectionalGains.isEmpty()) return currentTrackGain;
+        float gain = currentSectionalGains.get(0)[1];
+        for (float[] section : currentSectionalGains) {
+            if (section[0] <= positionMs) {
+                gain = section[1];
+            } else {
+                break;
+            }
+        }
+        return gain;
     }
 
     /** Gibt den NormalizationStore zurück (für die Activity). */
