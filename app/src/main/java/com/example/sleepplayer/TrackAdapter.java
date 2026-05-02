@@ -76,14 +76,23 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHol
             String uri = track.uri.toString();
             String refUri = normStore.getReferenceTrackUri();
             if (uri.equals(refUri)) {
-                // Dies ist der Referenz-Track
                 holder.tvNormBadge.setVisibility(View.VISIBLE);
                 holder.tvNormBadge.setText("⭐ Ref");
                 holder.tvNormBadge.setTextColor(Color.parseColor("#FFD700"));
-            } else if (normStore.hasGain(uri)) {
-                // Gain vorhanden → Offset in dB anzeigen
+            } else if (normStore.hasSectionalGains(uri)) {
+                // Sektionsweise normalisiert – zeige 📊 + Track-Gain falls vorhanden
                 float gain = normStore.getGain(uri);
-                float gainDb = (float) (20.0 * Math.log10(gain));
+                float gainDb = (float)(20.0 * Math.log10(gain));
+                String label = Math.abs(gainDb) < 0.5f
+                        ? "📊 sek."
+                        : String.format("📊 %+.1fdB", gainDb);
+                holder.tvNormBadge.setVisibility(View.VISIBLE);
+                holder.tvNormBadge.setText(label);
+                holder.tvNormBadge.setTextColor(Color.parseColor("#29B6F6")); // hellblau
+            } else if (normStore.hasGain(uri)) {
+                // Nur Gesamt-Gain vorhanden
+                float gain = normStore.getGain(uri);
+                float gainDb = (float)(20.0 * Math.log10(gain));
                 String label;
                 if (Math.abs(gainDb) < 0.5f) {
                     label = "±0 dB";
@@ -92,7 +101,6 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHol
                 }
                 holder.tvNormBadge.setVisibility(View.VISIBLE);
                 holder.tvNormBadge.setText(label);
-                // Grün = Boost, Rot = Cut, Grau = neutral
                 if (gainDb > 0.5f) {
                     holder.tvNormBadge.setTextColor(Color.parseColor("#4CAF50"));
                 } else if (gainDb < -0.5f) {

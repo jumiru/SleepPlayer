@@ -88,6 +88,8 @@
     <string name="norm_context_title">Normalisierung</string>
     <string name="norm_sectional_visualize">📈 Sektionen visualisieren</string>
     <string name="norm_sectional_chart_title">Gain-Anpassungen pro Sektion</string>
+    <string name="norm_section_length_label">Sektionslänge: %d Sek.</string>
+    <string name="norm_start_analysis">Analysieren</string>
 
     <!-- Meditation (4-7-8 Atemübung) -->
     <string name="meditation_start">🧘 Atemübung 4-7-8 starten</string>

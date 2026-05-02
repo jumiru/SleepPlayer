@@ -23,6 +23,7 @@ public class PrefsManager {
     private static final String KEY_FOLDER_DISPLAY = "folder_display_name";
     private static final String KEY_RANDOM_MODE = "random_mode";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
+    private static final String KEY_SECTION_LENGTH_SEC = "section_length_sec";
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -126,6 +127,22 @@ public class PrefsManager {
     /** Gibt zurück ob die Zeitansage aktiviert ist (Standard: true). */
     public boolean isTtsEnabled() {
         return prefs.getBoolean(KEY_TTS_ENABLED, true);
+    }
+
+    // --- Sektionslänge für dynamische Normalisierung ---
+
+    /**
+     * Speichert die Sektionslänge in Sekunden (1–30).
+     */
+    public void saveSectionLengthSec(int seconds) {
+        prefs.edit().putInt(KEY_SECTION_LENGTH_SEC, Math.max(1, Math.min(30, seconds))).apply();
+    }
+
+    /**
+     * Gibt die gespeicherte Sektionslänge zurück (Standard: 30 Sek).
+     */
+    public int getSectionLengthSec() {
+        return prefs.getInt(KEY_SECTION_LENGTH_SEC, 30);
     }
 
     // --- Zuletzt gespielte Titel ---

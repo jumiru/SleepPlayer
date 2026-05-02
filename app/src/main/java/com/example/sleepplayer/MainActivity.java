@@ -701,9 +701,60 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
     /**
      * Sektionsweise Normalisierung für einen einzelnen Track.
-     * Analysiert den Track in 30-Sekunden-Abschnitten und speichert pro Abschnitt einen Gain.
+     * Fragt zuerst nach der gewünschten Sektionslänge (1–30 Sek.), dann Analyse.
      */
     private void startSectionalNormalization(TrackSelector.TrackInfo track) {
+        String refUri = normalizationStore.getReferenceTrackUri();
+        if (refUri == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.norm_menu_normalize))
+                    .setMessage(getString(R.string.norm_no_ref))
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+
+        // Sektionslänge-Dialog mit SeekBar (1–30 Sek.)
+        int currentSec = prefsManager.getSectionLengthSec();
+
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int)(16 * getResources().getDisplayMetrics().density);
+        layout.setPadding(pad, pad, pad, 0);
+
+        TextView labelView = new TextView(this);
+        labelView.setTextColor(0xFFFFFFFF);
+        labelView.setTextSize(14f);
+        labelView.setText(getString(R.string.norm_section_length_label, currentSec));
+
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(29);                        // 0–29 → Sekunden 1–30
+        seekBar.setProgress(currentSec - 1);
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                labelView.setText(getString(R.string.norm_section_length_label, p + 1));
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+
+        layout.addView(labelView);
+        layout.addView(seekBar);
+
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.norm_sectional))
+                .setMessage(track.title)
+                .setView(layout)
+                .setPositiveButton(getString(R.string.norm_start_analysis), (d, w) -> {
+                    int chosenSec = seekBar.getProgress() + 1;
+                    prefsManager.saveSectionLengthSec(chosenSec);
+                    runSectionalNormalization(track, chosenSec * 1000);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Führt die eigentliche sektionsweise Analyse durch (nach Bestätigung der Sektionslänge). */
+    private void runSectionalNormalization(TrackSelector.TrackInfo track, int sectionLengthMs) {
         String refUri = normalizationStore.getReferenceTrackUri();
         if (refUri == null) {
             new AlertDialog.Builder(this)
@@ -745,9 +796,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             }
 
             final float targetDb = refDb;
-            // Sektionsweise Analyse des Tracks (30-Sekunden-Fenster)
+            // Sektionsweise Analyse des Tracks
             java.util.List<float[]> sections = AudioAnalyzer.analyzeSectionsDb(
-                    this, track.uri, 30_000,
+                    this, track.uri, sectionLengthMs,
                     p -> runOnUiThread(() -> pb.setProgress(p)));
 
             if (sections.isEmpty()) {
