@@ -159,7 +159,7 @@ public class PlaybackService extends Service {
         normalizationStore = new NormalizationStore(this);
 
         // Meditations-Controller initialisieren
-        meditationController = new MeditationController(new MeditationController.MeditationCallback() {
+        meditationController = new MeditationController(this, new MeditationController.MeditationCallback() {
             @Override
             public void onPhaseChanged(MeditationController.Phase phase, int cycle) {
                 Log.d(TAG, "Meditation Phase: " + phase + " Zyklus " + cycle);
@@ -279,7 +279,7 @@ public class PlaybackService extends Service {
             ttsHelper = null;
         }
         if (meditationController != null) {
-            meditationController.stop();
+            meditationController.release();
             meditationController = null;
         }
         if (mediaSession != null) {
