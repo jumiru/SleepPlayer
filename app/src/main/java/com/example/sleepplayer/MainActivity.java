@@ -493,6 +493,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         popup.getMenu().add(0, 5, 5, getString(R.string.norm_menu_reset))
                 .setEnabled(!normalizationStore.getAllGains().isEmpty());
 
+        // Meditations-Effekte
+        popup.getMenu().add(0, 7, 7, "🎛️ Meditations-Effekte…");
+
         // Referenz-Info (deaktiviert, nur zur Info)
         String refTitle = normalizationStore.getReferenceTrackTitle();
         if (refTitle != null) {
@@ -524,14 +527,129 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                     startNormalization();
                     return true;
                 case 5:
-                    normalizationStore.clearGains();   // Nur Gains löschen, Referenz-Track bleibt erhalten
+                    normalizationStore.clearGains();
                     trackAdapter.notifyDataSetChanged();
                     Toast.makeText(this, R.string.norm_reset_done, Toast.LENGTH_SHORT).show();
+                    return true;
+                case 7:
+                    showMeditationEffectsDialog();
                     return true;
             }
             return false;
         });
         popup.show();
+    }
+
+    /**
+     * Einstellungs-Dialog für Meditations-Audioeffekte (Reverb + Delay).
+     */
+    private void showMeditationEffectsDialog() {
+        float dp = getResources().getDisplayMetrics().density;
+        int pad = (int)(16 * dp);
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(pad, pad/2, pad, 0);
+
+        // ===== REVERB =====
+        TextView tvReverb = new TextView(this);
+        tvReverb.setText("🏛️ Reverb (Raumhall)");
+        tvReverb.setTextColor(0xFF90CAF9);
+        tvReverb.setTextSize(13f);
+        tvReverb.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(tvReverb);
+
+        android.widget.CheckBox cbReverb = new android.widget.CheckBox(this);
+        cbReverb.setText("Reverb aktiviert");
+        cbReverb.setTextColor(0xFFFFFFFF);
+        cbReverb.setChecked(prefsManager.isMeditationReverbEnabled());
+        root.addView(cbReverb);
+
+        int decayCurrent = prefsManager.getMeditationReverbDecay();
+        TextView tvDecayLabel = new TextView(this);
+        tvDecayLabel.setTextColor(0xFFB0BEC5);
+        tvDecayLabel.setTextSize(12f);
+        tvDecayLabel.setText("Nachhallzeit: " + decayCurrent + " ms");
+        root.addView(tvDecayLabel);
+
+        SeekBar sbDecay = new SeekBar(this);
+        sbDecay.setMax(110); // 0→500 ms … 110→6050 ms (50 ms Schritte)
+        sbDecay.setProgress((decayCurrent - 500) / 50);
+        sbDecay.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
+                tvDecayLabel.setText("Nachhallzeit: " + (500 + p * 50) + " ms");
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(sbDecay);
+
+        // ===== DELAY =====
+        TextView tvDelay = new TextView(this);
+        tvDelay.setText("🔁 Delay (Echo)");
+        tvDelay.setTextColor(0xFF90CAF9);
+        tvDelay.setTextSize(13f);
+        tvDelay.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvDelay.setPadding(0, (int)(12*dp), 0, 0);
+        root.addView(tvDelay);
+
+        android.widget.CheckBox cbDelay = new android.widget.CheckBox(this);
+        cbDelay.setText("Delay aktiviert");
+        cbDelay.setTextColor(0xFFFFFFFF);
+        cbDelay.setChecked(prefsManager.isMeditationDelayEnabled());
+        root.addView(cbDelay);
+
+        int delayCurrent = prefsManager.getMeditationDelayMs();
+        TextView tvDelayMsLabel = new TextView(this);
+        tvDelayMsLabel.setTextColor(0xFFB0BEC5);
+        tvDelayMsLabel.setTextSize(12f);
+        tvDelayMsLabel.setText("Delay-Zeit: " + delayCurrent + " ms");
+        root.addView(tvDelayMsLabel);
+
+        SeekBar sbDelayMs = new SeekBar(this);
+        sbDelayMs.setMax(38); // 0→100 ms … 38→1990 ms (50 ms Schritte)
+        sbDelayMs.setProgress((delayCurrent - 100) / 50);
+        sbDelayMs.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
+                tvDelayMsLabel.setText("Delay-Zeit: " + (100 + p * 50) + " ms");
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(sbDelayMs);
+
+        int levelCurrent = prefsManager.getMeditationDelayLevel();
+        TextView tvDelayLvlLabel = new TextView(this);
+        tvDelayLvlLabel.setTextColor(0xFFB0BEC5);
+        tvDelayLvlLabel.setTextSize(12f);
+        tvDelayLvlLabel.setText("Echo-Lautstärke: " + levelCurrent + " %");
+        root.addView(tvDelayLvlLabel);
+
+        SeekBar sbDelayLvl = new SeekBar(this);
+        sbDelayLvl.setMax(100);
+        sbDelayLvl.setProgress(levelCurrent);
+        sbDelayLvl.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
+                tvDelayLvlLabel.setText("Echo-Lautstärke: " + p + " %");
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(sbDelayLvl);
+
+        new AlertDialog.Builder(this)
+                .setTitle("🎛️ Meditations-Effekte")
+                .setView(root)
+                .setPositiveButton("Speichern", (d, w) -> {
+                    prefsManager.saveMeditationReverbEnabled(cbReverb.isChecked());
+                    prefsManager.saveMeditationReverbDecay(500 + sbDecay.getProgress() * 50);
+                    prefsManager.saveMeditationDelayEnabled(cbDelay.isChecked());
+                    prefsManager.saveMeditationDelayMs(100 + sbDelayMs.getProgress() * 50);
+                    prefsManager.saveMeditationDelayLevel(sbDelayLvl.getProgress());
+                    Toast.makeText(this, "✅ Effekte gespeichert", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /**

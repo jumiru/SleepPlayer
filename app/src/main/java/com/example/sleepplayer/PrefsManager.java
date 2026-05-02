@@ -23,7 +23,15 @@ public class PrefsManager {
     private static final String KEY_FOLDER_DISPLAY = "folder_display_name";
     private static final String KEY_RANDOM_MODE = "random_mode";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
-    private static final String KEY_SECTION_LENGTH_SEC = "section_length_sec";
+    private static final String KEY_SECTION_LENGTH_SEC   = "section_length_sec";
+
+    // --- Meditations-Effekte ---
+    private static final String KEY_MED_REVERB_ENABLED = "med_reverb_enabled";
+    private static final String KEY_MED_REVERB_DECAY   = "med_reverb_decay";   // ms
+    private static final String KEY_MED_DELAY_ENABLED  = "med_delay_enabled";
+    private static final String KEY_MED_DELAY_MS       = "med_delay_ms";       // ms
+    private static final String KEY_MED_DELAY_LEVEL    = "med_delay_level";    // 0–100 %
+
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -144,6 +152,26 @@ public class PrefsManager {
     public int getSectionLengthSec() {
         return prefs.getInt(KEY_SECTION_LENGTH_SEC, 30);
     }
+
+    // --- Meditations-Effekte ---
+
+    public void saveMeditationReverbEnabled(boolean on) { prefs.edit().putBoolean(KEY_MED_REVERB_ENABLED, on).apply(); }
+    public boolean isMeditationReverbEnabled()          { return prefs.getBoolean(KEY_MED_REVERB_ENABLED, true); }
+
+    /** Nachhallzeit in ms (500–6000). Standard: 3500 ms */
+    public void saveMeditationReverbDecay(int ms) { prefs.edit().putInt(KEY_MED_REVERB_DECAY, ms).apply(); }
+    public int getMeditationReverbDecay()          { return prefs.getInt(KEY_MED_REVERB_DECAY, 3500); }
+
+    public void saveMeditationDelayEnabled(boolean on) { prefs.edit().putBoolean(KEY_MED_DELAY_ENABLED, on).apply(); }
+    public boolean isMeditationDelayEnabled()          { return prefs.getBoolean(KEY_MED_DELAY_ENABLED, true); }
+
+    /** Delay-Zeit in ms (100–2000). Standard: 1000 ms */
+    public void saveMeditationDelayMs(int ms) { prefs.edit().putInt(KEY_MED_DELAY_MS, ms).apply(); }
+    public int getMeditationDelayMs()          { return prefs.getInt(KEY_MED_DELAY_MS, 1000); }
+
+    /** Delay-Lautstärke 0–100 %. Standard: 35 % */
+    public void saveMeditationDelayLevel(int percent) { prefs.edit().putInt(KEY_MED_DELAY_LEVEL, percent).apply(); }
+    public int getMeditationDelayLevel()               { return prefs.getInt(KEY_MED_DELAY_LEVEL, 35); }
 
     // --- Zuletzt gespielte Titel ---
 

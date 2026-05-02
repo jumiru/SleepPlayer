@@ -37,18 +37,17 @@ public class MeditationController {
     private static final long INTRO_PAUSE_MS = 5_000L;
     private static final long OUTRO_PAUSE_MS = 3_000L;
 
-    // ===== Reverb-Einstellungen (großer, warmer Saal) =====
-    // Werte: Pegel in Millibel (mB), 0 mB = 0 dB; -9000 mB = -90 dB (Minimum = aus)
-    private static final short REVERB_ROOM_LEVEL       = -1000;  // Gesamt-Hallpegel
-    private static final short REVERB_ROOM_HF_LEVEL    = -2000;  // Dämpfung hoher Frequenzen (warm)
-    private static final int   REVERB_DECAY_TIME       = 3500;   // Nachhallzeit in ms
-    private static final short REVERB_DECAY_HF_RATIO   =  500;   // 50 % HF-Ratio (weich)
-    private static final short REVERB_REFLECTIONS_LVL  = -2800;  // Erste Reflexionen
-    private static final int   REVERB_REFLECTIONS_DLY  =   20;   // Verzögerung in ms
-    private static final short REVERB_REVERB_LEVEL     = -1200;  // Diffuser Hall
-    private static final int   REVERB_REVERB_DELAY     =   40;   // Delay in ms
-    private static final short REVERB_DIFFUSION        = 1000;   // maximale Diffusion
-    private static final short REVERB_DENSITY          =  800;   // hohe Dichte
+    // ===== Reverb-Standardwerte (werden aus PrefsManager überschrieben) =====
+    // Werte: Pegel in Millibel (mB)
+    private static final short REVERB_ROOM_LEVEL      = -1000;
+    private static final short REVERB_ROOM_HF_LEVEL   = -2000;
+    private static final short REVERB_DECAY_HF_RATIO  =  500;
+    private static final short REVERB_REFLECTIONS_LVL = -2800;
+    private static final int   REVERB_REFLECTIONS_DLY =   20;
+    private static final short REVERB_REVERB_LEVEL    = -1200;
+    private static final int   REVERB_REVERB_DELAY    =   40;
+    private static final short REVERB_DIFFUSION       = 1000;
+    private static final short REVERB_DENSITY         =  800;
 
     // --- Öffentliche Typen ---
 
@@ -64,6 +63,7 @@ public class MeditationController {
     private final Context            context;
     private final MeditationCallback callback;
     private final Handler            handler = new Handler(Looper.getMainLooper());
+    private final PrefsManager       prefs;
 
     private SoundPool            soundPool;
     private EnvironmentalReverb  reverb;
@@ -77,11 +77,17 @@ public class MeditationController {
     private int              cycleCount  = 0;
     private float            volume      = 0.5f;
 
+    // Effekt-Einstellungen (werden bei start() aus PrefsManager geladen)
+    private boolean delayEnabled  = true;
+    private int     delayMs       = 1000;
+    private float   delayLevel    = 0.35f;
+
     // ===== Konstruktor =====
 
     public MeditationController(Context context, MeditationCallback callback) {
         this.context  = context.getApplicationContext();
         this.callback = callback;
+        this.prefs    = new PrefsManager(this.context);
         initSoundPool();
     }
 
@@ -112,12 +118,24 @@ public class MeditationController {
 
     private void initReverb() {
         try {
-            // Session-ID 0 = globaler Effekt (gilt für alle Audio-Ausgaben des Prozesses,
-            // solange kein anderer Effekt höhere Priorität hat)
             reverb = new EnvironmentalReverb(0, 0);
+            applyReverbSettings();
+            reverb.setEnabled(prefs.isMeditationReverbEnabled());
+            Log.d(TAG, "EnvironmentalReverb initialisiert");
+        } catch (Exception e) {
+            Log.w(TAG, "EnvironmentalReverb nicht verfügbar: " + e.getMessage());
+            reverb = null;
+        }
+    }
+
+    /** Überträgt aktuelle Prefs-Werte auf den Reverb-Effekt. */
+    private void applyReverbSettings() {
+        if (reverb == null) return;
+        try {
+            int decayMs = prefs.getMeditationReverbDecay();
             reverb.setRoomLevel(REVERB_ROOM_LEVEL);
             reverb.setRoomHFLevel(REVERB_ROOM_HF_LEVEL);
-            reverb.setDecayTime(REVERB_DECAY_TIME);
+            reverb.setDecayTime(decayMs);
             reverb.setDecayHFRatio(REVERB_DECAY_HF_RATIO);
             reverb.setReflectionsLevel(REVERB_REFLECTIONS_LVL);
             reverb.setReflectionsDelay(REVERB_REFLECTIONS_DLY);
@@ -125,12 +143,8 @@ public class MeditationController {
             reverb.setReverbDelay(REVERB_REVERB_DELAY);
             reverb.setDiffusion(REVERB_DIFFUSION);
             reverb.setDensity(REVERB_DENSITY);
-            reverb.setEnabled(true);
-            Log.d(TAG, "EnvironmentalReverb aktiv (global)");
         } catch (Exception e) {
-            // Gerät unterstützt keinen EnvironmentalReverb – kein Problem, Ton spielt ohne Effekt
-            Log.w(TAG, "EnvironmentalReverb nicht verfügbar: " + e.getMessage());
-            reverb = null;
+            Log.w(TAG, "applyReverbSettings Fehler: " + e.getMessage());
         }
     }
 
@@ -152,7 +166,21 @@ public class MeditationController {
         running     = true;
         startTimeMs = System.currentTimeMillis();
         cycleCount  = 0;
-        Log.d(TAG, "Meditation gestartet (volume=" + this.volume + ")");
+
+        // Effekt-Einstellungen aus Prefs laden
+        delayEnabled = prefs.isMeditationDelayEnabled();
+        delayMs      = prefs.getMeditationDelayMs();
+        delayLevel   = prefs.getMeditationDelayLevel() / 100f;
+
+        // Reverb ggf. aktualisieren
+        if (reverb != null) {
+            applyReverbSettings();
+            reverb.setEnabled(prefs.isMeditationReverbEnabled());
+        }
+
+        Log.d(TAG, "Meditation gestartet (volume=" + this.volume
+                + " reverb=" + prefs.isMeditationReverbEnabled()
+                + " delay=" + delayEnabled + " delayMs=" + delayMs + ")");
 
         playSound(idChord);
         handler.postDelayed(this::scheduleInhale, INTRO_PAUSE_MS);
@@ -235,5 +263,15 @@ public class MeditationController {
     private void playSound(int soundId) {
         if (soundPool == null || soundId == 0) return;
         soundPool.play(soundId, volume, volume, 1, 0, 1.0f);
+        // Delay: zweites Echo nach delayMs mit reduzierter Lautstärke
+        if (delayEnabled && delayMs > 0) {
+            final float echoVol = volume * delayLevel;
+            handler.postDelayed(() -> {
+                if (soundPool != null) {
+                    soundPool.play(soundId, echoVol, echoVol, 0, 0, 1.0f);
+                }
+            }, delayMs);
+        }
     }
 }
+
