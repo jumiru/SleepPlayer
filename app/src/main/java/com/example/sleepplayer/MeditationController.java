@@ -263,14 +263,17 @@ public class MeditationController {
     private void playSound(int soundId) {
         if (soundPool == null || soundId == 0) return;
         soundPool.play(soundId, volume, volume, 1, 0, 1.0f);
-        // Delay: zweites Echo nach delayMs mit reduzierter Lautstärke
+        // Delay: 4 Echos mit wachsender Verzögerung und exponentiell abnehmender Lautstärke
         if (delayEnabled && delayMs > 0) {
-            final float echoVol = volume * delayLevel;
-            handler.postDelayed(() -> {
-                if (soundPool != null) {
-                    soundPool.play(soundId, echoVol, echoVol, 0, 0, 1.0f);
-                }
-            }, delayMs);
+            for (int i = 1; i <= 4; i++) {
+                final float echoVol = volume * (float) Math.pow(delayLevel, i);
+                final long echoDelay = (long) delayMs * i;
+                handler.postDelayed(() -> {
+                    if (soundPool != null) {
+                        soundPool.play(soundId, echoVol, echoVol, 0, 0, 1.0f);
+                    }
+                }, echoDelay);
+            }
         }
     }
 }
