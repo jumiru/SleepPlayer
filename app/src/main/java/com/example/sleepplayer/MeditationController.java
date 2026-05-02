@@ -3,12 +3,13 @@ package com.example.sleepplayer;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.SoundPool;
+import android.media.audiofx.EnvironmentalReverb;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
 /**
- * Steuert die 4-7-8 Atemübung mit aufgenommenen Audio-Samples.
+ * Steuert die 4-7-8 Atemübung mit aufgenommenen Audio-Samples + Reverb-Effekt.
  *
  * Ablauf:
  *   1. Intro-Chord (meditation_chord) + 5 s Einrichtungspause
@@ -19,13 +20,9 @@ import android.util.Log;
  *   5. Abschluss-Chord (meditation_chord)
  *   6. Callback → PlaybackService wechselt in Schlafmodus
  *
- * Samples müssen in res/raw/ abgelegt werden:
- *   meditation_chord.wav   – Begrüßungs-/Abschluss-Akkord
- *   meditation_inhale.wav  – Ton für Einatmen
- *   meditation_hold.wav    – Ton für Halten
- *   meditation_exhale.wav  – Ton für Ausatmen
- *
- * Solange Dateien fehlen, läuft die Übung ohne Ton (nur Callbacks/Timing).
+ * Samples in res/raw/:
+ *   meditation_chord.m4a / meditation_inhale.m4a /
+ *   meditation_hold.m4a  / meditation_exhale.m4a
  */
 public class MeditationController {
 
@@ -37,11 +34,21 @@ public class MeditationController {
     public static final long DUR_HOLD_MS   = 7_000L;
     public static final long DUR_EXHALE_MS = 8_000L;
 
-    /** Pause nach dem Intro-Chord, bevor der erste Atemzyklus beginnt. */
     private static final long INTRO_PAUSE_MS = 5_000L;
-
-    /** Pause nach dem Abschluss-Chord, bevor der Finished-Callback kommt. */
     private static final long OUTRO_PAUSE_MS = 3_000L;
+
+    // ===== Reverb-Einstellungen (großer, warmer Saal) =====
+    // Werte: Pegel in Millibel (mB), 0 mB = 0 dB; -9000 mB = -90 dB (Minimum = aus)
+    private static final short REVERB_ROOM_LEVEL       = -1000;  // Gesamt-Hallpegel
+    private static final short REVERB_ROOM_HF_LEVEL    = -2000;  // Dämpfung hoher Frequenzen (warm)
+    private static final int   REVERB_DECAY_TIME       = 3500;   // Nachhallzeit in ms
+    private static final short REVERB_DECAY_HF_RATIO   =  500;   // 50 % HF-Ratio (weich)
+    private static final short REVERB_REFLECTIONS_LVL  = -2800;  // Erste Reflexionen
+    private static final int   REVERB_REFLECTIONS_DLY  =   20;   // Verzögerung in ms
+    private static final short REVERB_REVERB_LEVEL     = -1200;  // Diffuser Hall
+    private static final int   REVERB_REVERB_DELAY     =   40;   // Delay in ms
+    private static final short REVERB_DIFFUSION        = 1000;   // maximale Diffusion
+    private static final short REVERB_DENSITY          =  800;   // hohe Dichte
 
     // --- Öffentliche Typen ---
 
@@ -58,11 +65,12 @@ public class MeditationController {
     private final MeditationCallback callback;
     private final Handler            handler = new Handler(Looper.getMainLooper());
 
-    private SoundPool soundPool;
-    private int       idChord   = 0;
-    private int       idInhale  = 0;
-    private int       idHold   = 0;
-    private int       idExhale  = 0;
+    private SoundPool            soundPool;
+    private EnvironmentalReverb  reverb;
+    private int idChord  = 0;
+    private int idInhale = 0;
+    private int idHold   = 0;
+    private int idExhale = 0;
 
     private volatile boolean running     = false;
     private long             startTimeMs = 0;
@@ -90,7 +98,6 @@ public class MeditationController {
                 .setAudioAttributes(attrs)
                 .build();
 
-        // Samples laden – schlägt lautlos fehl wenn Datei noch nicht existiert
         idChord  = safeLoad(R.raw.meditation_chord);
         idInhale = safeLoad(R.raw.meditation_inhale);
         idHold   = safeLoad(R.raw.meditation_hold);
@@ -98,9 +105,35 @@ public class MeditationController {
 
         Log.d(TAG, "SoundPool – chord=" + idChord + " inhale=" + idInhale
                 + " hold=" + idHold + " exhale=" + idExhale);
+
+        // Reverb-Effekt an die Audio-Session des SoundPool binden
+        initReverb();
     }
 
-    /** Lädt ein Raw-Sample sicher (gibt 0 zurück wenn nicht vorhanden). */
+    private void initReverb() {
+        try {
+            // Session-ID 0 = globaler Effekt (gilt für alle Audio-Ausgaben des Prozesses,
+            // solange kein anderer Effekt höhere Priorität hat)
+            reverb = new EnvironmentalReverb(0, 0);
+            reverb.setRoomLevel(REVERB_ROOM_LEVEL);
+            reverb.setRoomHFLevel(REVERB_ROOM_HF_LEVEL);
+            reverb.setDecayTime(REVERB_DECAY_TIME);
+            reverb.setDecayHFRatio(REVERB_DECAY_HF_RATIO);
+            reverb.setReflectionsLevel(REVERB_REFLECTIONS_LVL);
+            reverb.setReflectionsDelay(REVERB_REFLECTIONS_DLY);
+            reverb.setReverbLevel(REVERB_REVERB_LEVEL);
+            reverb.setReverbDelay(REVERB_REVERB_DELAY);
+            reverb.setDiffusion(REVERB_DIFFUSION);
+            reverb.setDensity(REVERB_DENSITY);
+            reverb.setEnabled(true);
+            Log.d(TAG, "EnvironmentalReverb aktiv (global)");
+        } catch (Exception e) {
+            // Gerät unterstützt keinen EnvironmentalReverb – kein Problem, Ton spielt ohne Effekt
+            Log.w(TAG, "EnvironmentalReverb nicht verfügbar: " + e.getMessage());
+            reverb = null;
+        }
+    }
+
     private int safeLoad(int resId) {
         try {
             return soundPool.load(context, resId, 1);
@@ -146,6 +179,10 @@ public class MeditationController {
     /** Gibt SoundPool-Ressourcen frei. */
     public void release() {
         stop();
+        if (reverb != null) {
+            try { reverb.setEnabled(false); reverb.release(); } catch (Exception ignored) {}
+            reverb = null;
+        }
         if (soundPool != null) {
             soundPool.release();
             soundPool = null;
@@ -194,8 +231,6 @@ public class MeditationController {
             }
         }, OUTRO_PAUSE_MS);
     }
-
-    // ===== Ton-Wiedergabe =====
 
     private void playSound(int soundId) {
         if (soundPool == null || soundId == 0) return;
