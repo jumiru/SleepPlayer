@@ -542,6 +542,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
     /**
      * Einstellungs-Dialog für Meditations-Audioeffekte (Reverb + Delay).
+     * Verwendet MaterialSwitch für zuverlässiges Toggle-Verhalten im dunklen Theme.
      */
     private void showMeditationEffectsDialog() {
         float dp = getResources().getDisplayMetrics().density;
@@ -549,23 +550,35 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setPadding(pad, pad/2, pad, 0);
+        root.setPadding(pad, pad / 2, pad, pad);
+
+        // Helper: Abschnitts-Überschrift
+        java.util.function.Consumer<String> addHeader = text -> {
+            TextView tv = new TextView(this);
+            tv.setText(text);
+            tv.setTextColor(0xFF90CAF9);
+            tv.setTextSize(13f);
+            tv.setTypeface(null, android.graphics.Typeface.BOLD);
+            tv.setPadding(0, (int)(10*dp), 0, 4);
+            root.addView(tv);
+        };
+
+        // Helper: Switch-Zeile (Label links, Switch rechts)
+        android.widget.LinearLayout[] switchRowHolder = new android.widget.LinearLayout[2];
+        // Wir bauen die Rows inline
 
         // ===== REVERB =====
-        TextView tvReverb = new TextView(this);
-        tvReverb.setText("🏛️ Reverb (Raumhall)");
-        tvReverb.setTextColor(0xFF90CAF9);
-        tvReverb.setTextSize(13f);
-        tvReverb.setTypeface(null, android.graphics.Typeface.BOLD);
-        root.addView(tvReverb);
+        addHeader.accept("🏛️ Reverb (Raumhall)");
 
-        android.widget.CheckBox cbReverb = new android.widget.CheckBox(this);
-        cbReverb.setText("Reverb aktiviert");
-        cbReverb.setTextColor(0xFFFFFFFF);
-        cbReverb.setChecked(prefsManager.isMeditationReverbEnabled());
-        root.addView(cbReverb);
+        boolean reverbOn = prefsManager.isMeditationReverbEnabled();
+        com.google.android.material.materialswitch.MaterialSwitch swReverb =
+                new com.google.android.material.materialswitch.MaterialSwitch(this);
+        swReverb.setText("Reverb aktiv");
+        swReverb.setChecked(reverbOn);
+        swReverb.setTextColor(0xFFFFFFFF);
+        root.addView(swReverb);
 
-        int decayCurrent = prefsManager.getMeditationReverbDecay();
+        int decayCurrent = Math.max(500, prefsManager.getMeditationReverbDecay());
         TextView tvDecayLabel = new TextView(this);
         tvDecayLabel.setTextColor(0xFFB0BEC5);
         tvDecayLabel.setTextSize(12f);
@@ -573,8 +586,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         root.addView(tvDecayLabel);
 
         SeekBar sbDecay = new SeekBar(this);
-        sbDecay.setMax(110); // 0→500 ms … 110→6050 ms (50 ms Schritte)
-        sbDecay.setProgress((decayCurrent - 500) / 50);
+        sbDecay.setMax(110); // 0 → 500 ms … 110 → 6050 ms (50 ms Schritte)
+        sbDecay.setProgress(Math.max(0, (decayCurrent - 500) / 50));
         sbDecay.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
                 tvDecayLabel.setText("Nachhallzeit: " + (500 + p * 50) + " ms");
@@ -585,21 +598,17 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         root.addView(sbDecay);
 
         // ===== DELAY =====
-        TextView tvDelay = new TextView(this);
-        tvDelay.setText("🔁 Delay (Echo)");
-        tvDelay.setTextColor(0xFF90CAF9);
-        tvDelay.setTextSize(13f);
-        tvDelay.setTypeface(null, android.graphics.Typeface.BOLD);
-        tvDelay.setPadding(0, (int)(12*dp), 0, 0);
-        root.addView(tvDelay);
+        addHeader.accept("🔁 Delay (Echo × 4)");
 
-        android.widget.CheckBox cbDelay = new android.widget.CheckBox(this);
-        cbDelay.setText("Delay aktiviert");
-        cbDelay.setTextColor(0xFFFFFFFF);
-        cbDelay.setChecked(prefsManager.isMeditationDelayEnabled());
-        root.addView(cbDelay);
+        boolean delayOn = prefsManager.isMeditationDelayEnabled();
+        com.google.android.material.materialswitch.MaterialSwitch swDelay =
+                new com.google.android.material.materialswitch.MaterialSwitch(this);
+        swDelay.setText("Delay aktiv");
+        swDelay.setChecked(delayOn);
+        swDelay.setTextColor(0xFFFFFFFF);
+        root.addView(swDelay);
 
-        int delayCurrent = prefsManager.getMeditationDelayMs();
+        int delayCurrent = Math.max(100, prefsManager.getMeditationDelayMs());
         TextView tvDelayMsLabel = new TextView(this);
         tvDelayMsLabel.setTextColor(0xFFB0BEC5);
         tvDelayMsLabel.setTextSize(12f);
@@ -607,8 +616,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         root.addView(tvDelayMsLabel);
 
         SeekBar sbDelayMs = new SeekBar(this);
-        sbDelayMs.setMax(38); // 0→100 ms … 38→1990 ms (50 ms Schritte)
-        sbDelayMs.setProgress((delayCurrent - 100) / 50);
+        sbDelayMs.setMax(38); // 0 → 100 ms … 38 → 1990 ms (50 ms Schritte)
+        sbDelayMs.setProgress(Math.max(0, (delayCurrent - 100) / 50));
         sbDelayMs.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
                 tvDelayMsLabel.setText("Delay-Zeit: " + (100 + p * 50) + " ms");
@@ -637,16 +646,23 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         });
         root.addView(sbDelayLvl);
 
+        // ScrollView damit alles auf kleinen Bildschirmen erreichbar ist
+        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
+        scrollView.addView(root);
+
         new AlertDialog.Builder(this)
-                .setTitle("🎛️ Meditations-Effekte")
-                .setView(root)
+                .setTitle("🎛�� Meditations-Effekte")
+                .setView(scrollView)
                 .setPositiveButton("Speichern", (d, w) -> {
-                    prefsManager.saveMeditationReverbEnabled(cbReverb.isChecked());
+                    prefsManager.saveMeditationReverbEnabled(swReverb.isChecked());
                     prefsManager.saveMeditationReverbDecay(500 + sbDecay.getProgress() * 50);
-                    prefsManager.saveMeditationDelayEnabled(cbDelay.isChecked());
+                    prefsManager.saveMeditationDelayEnabled(swDelay.isChecked());
                     prefsManager.saveMeditationDelayMs(100 + sbDelayMs.getProgress() * 50);
                     prefsManager.saveMeditationDelayLevel(sbDelayLvl.getProgress());
-                    Toast.makeText(this, "✅ Effekte gespeichert", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this,
+                            "✅ Reverb " + (swReverb.isChecked() ? "an" : "aus")
+                            + "  •  Delay " + (swDelay.isChecked() ? "an" : "aus"),
+                            Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
