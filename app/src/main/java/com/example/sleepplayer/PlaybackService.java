@@ -90,24 +90,6 @@ public class PlaybackService extends Service {
      */
     private float currentTrackGain = 1.0f;
 
-    /**
-     * Sektionsweise Gain-Daten für den aktuellen Track.
-     * float[2] = [sectionStartMs, gainMultiplier]. null = keine Sektionsdaten.
-     */
-    private List<float[]> currentSectionalGains = null;
-
-    /** Handler-Runnable zum periodischen Anpassen des Sektions-Gains. */
-    private static final int SECTIONAL_GAIN_INTERVAL_MS = 2000;
-    private final Runnable sectionalGainRunnable = new Runnable() {
-        @Override
-        public void run() {
-            applySectionalGain();
-            if (isPlaying && currentSectionalGains != null) {
-                mainHandler.postDelayed(this, SECTIONAL_GAIN_INTERVAL_MS);
-            }
-        }
-    };
-
     /** Normalisierungs-Daten (Referenz-Track + Gain-Offsets). */
     private NormalizationStore normalizationStore;
 
@@ -405,11 +387,7 @@ public class PlaybackService extends Service {
 
         // Normalisierungs-Gain für diesen Track laden
         currentTrackGain = normalizationStore.getGain(track.uri.toString());
-        // Sektionsweise Gains laden (null wenn nicht vorhanden)
-        currentSectionalGains = normalizationStore.getSectionalGains(track.uri.toString());
-        mainHandler.removeCallbacks(sectionalGainRunnable);
-        Log.d(TAG, "Track-Gain: " + currentTrackGain + "× für " + track.title
-                + (currentSectionalGains != null ? " (" + currentSectionalGains.size() + " Sektionen)" : ""));
+        Log.d(TAG, "Track-Gain: " + currentTrackGain + "× für " + track.title);
 
         try {
             MediaPlayer player = new MediaPlayer();
@@ -442,11 +420,6 @@ public class PlaybackService extends Service {
                 if (callback != null) {
                     callback.onTrackChanged(track);
                     callback.onPlaybackStateChanged(true);
-                }
-
-                // Sektions-Gain-Handler starten falls Sektionsdaten vorhanden
-                if (currentSectionalGains != null) {
-                    mainHandler.postDelayed(sectionalGainRunnable, SECTIONAL_GAIN_INTERVAL_MS);
                 }
 
                 // Timer starten falls noch nicht läuft
@@ -498,7 +471,10 @@ public class PlaybackService extends Service {
     public void togglePlayPause() {
         Log.d(TAG, "togglePlayPause() – isPlaying=" + isPlaying
                 + ", hasPlayer=" + (mediaPlayer != null)
-                + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null"));
+                + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null")
+                + ", isMeditating=" + isMeditating()
+                + ", isTimerRunning=" + isTimerRunning
+                + ", wakeLockHeld=" + (serviceWakeLock != null && serviceWakeLock.isHeld()));
 
         // Wenn Meditation läuft → Pause = Meditation beenden, zurück in Schlafmodus
         if (isMeditating()) {
@@ -565,15 +541,20 @@ public class PlaybackService extends Service {
 
     /**
      * Setzt die Wiedergabe fort.
+     * Falls der MediaPlayer nach langer Pause in einem ungültigen Zustand ist,
+     * wird er freigegeben und der Track neu geladen (Recovery).
      */
     public void resumePlayback() {
         Log.d(TAG, "resumePlayback() – isPlaying=" + isPlaying
-                + ", hasPlayer=" + (mediaPlayer != null));
+                + ", hasPlayer=" + (mediaPlayer != null)
+                + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null")
+                + ", isFadingOut=" + isFadingOut
+                + ", wakeLockHeld=" + (serviceWakeLock != null && serviceWakeLock.isHeld()));
         if (mediaPlayer != null && !isPlaying) {
             // Audio Focus erneut anfordern
             int result = audioManager.requestAudioFocus(audioFocusRequest);
             if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                Log.w(TAG, "Audio Focus nicht erhalten in resumePlayback()");
+                Log.w(TAG, "Audio Focus nicht erhalten in resumePlayback() – result=" + result);
                 return;
             }
             // Lautstärke wiederherstellen – nach Fade-out ist sie nahe 0
@@ -581,22 +562,30 @@ public class PlaybackService extends Service {
             try {
                 mediaPlayer.start();
             } catch (IllegalStateException e) {
-                Log.e(TAG, "IllegalStateException in resumePlayback()", e);
+                Log.e(TAG, "IllegalStateException in resumePlayback() – Player ungültig nach langer Pause", e);
+                // Recovery: Player freigeben und Track neu laden
+                Log.d(TAG, "resumePlayback Recovery: starte Track neu – " + (currentTrack != null ? currentTrack.title : "null"));
+                releaseMediaPlayer();
+                if (currentTrack != null) {
+                    playTrackInternal(currentTrack);
+                } else {
+                    startRandomPlayback();
+                }
                 return;
             }
             isPlaying = true;
+            // WakeLock wieder acquirieren da wir aktiv spielen
+            acquireServiceWakeLock();
             updatePlaybackState(PlaybackStateCompat.STATE_PLAYING);
             showNotification();
-
-            // Sektions-Gain-Handler neu starten falls Sektionsdaten vorhanden
-            if (currentSectionalGains != null) {
-                mainHandler.removeCallbacks(sectionalGainRunnable);
-                mainHandler.postDelayed(sectionalGainRunnable, SECTIONAL_GAIN_INTERVAL_MS);
-            }
 
             if (callback != null) {
                 callback.onPlaybackStateChanged(true);
             }
+            Log.d(TAG, "resumePlayback() erfolgreich – " + (currentTrack != null ? currentTrack.title : "?"));
+        } else {
+            Log.w(TAG, "resumePlayback() ignoriert: isPlaying=" + isPlaying
+                    + ", mediaPlayer=" + (mediaPlayer != null ? "vorhanden" : "null"));
         }
     }
 
@@ -760,6 +749,10 @@ public class PlaybackService extends Service {
                 // Wiedergabe pausieren (nicht komplett stoppen)
                 pausePlayback();
 
+                // WakeLock freigeben: als Foreground-Service bleiben wir am Leben,
+                // der Lock ist im Schlafmodus unnötig und würde den Akku belasten.
+                releaseServiceWakeLock();
+
                 if (callback != null) {
                     callback.onTimerFinished();
                 }
@@ -772,8 +765,10 @@ public class PlaybackService extends Service {
                 // Der Nutzer kann die Notification wegwischen um den Service zu beenden.
                 showSleepModeNotification();
 
-                Log.d(TAG, "Service bleibt im Foreground (Sleep-Mode-Notification). "
-                        + "Kopfhörertaste kann Wiedergabe jederzeit neu starten.");
+                Log.d(TAG, "Sleep-Mode aktiv: WakeLock freigegeben, Foreground-Notification aktiv. "
+                        + "MediaSession empfängt weiter Kopfhörer-Events."
+                        + " | currentTrack=" + (currentTrack != null ? currentTrack.title : "null")
+                        + " | mediaPlayer=" + (mediaPlayer != null ? "vorhanden" : "null"));
             }
         };
         sleepTimer.start();
@@ -870,7 +865,6 @@ public class PlaybackService extends Service {
     // ===== Private Hilfsmethoden =====
 
     private void releaseMediaPlayer() {
-        mainHandler.removeCallbacks(sectionalGainRunnable);
         if (mediaPlayer != null) {
             Log.d(TAG, "releaseMediaPlayer()");
             try {
@@ -887,9 +881,7 @@ public class PlaybackService extends Service {
             }
             mediaPlayer = null;
         }
-    }
-
-    private void stopTimerInternal() {
+    }    private void stopTimerInternal() {
         if (sleepTimer != null) {
             sleepTimer.cancel();
             sleepTimer = null;
@@ -1004,10 +996,18 @@ public class PlaybackService extends Service {
         Log.d(TAG, "Meditations-Notification aktiv");
     }
 
-    /** Acquiriert den Service-WakeLock (idempotent). */
-    private void acquireServiceWakeLock() {        if (serviceWakeLock != null && !serviceWakeLock.isHeld()) {
-            serviceWakeLock.acquire();
-            Log.d(TAG, "Service-WakeLock acquired");
+    /** Acquiriert den Service-WakeLock mit 10-Minuten-Timeout (idempotent).
+     *  Ein Timeout ist wichtig: ohne ihn kann es auf Android 10+ zu einem
+     *  "WakeLock finalized while still held"-Crash kommen falls der Service
+     *  unerwartet zerstört wird. */
+    private void acquireServiceWakeLock() {
+        if (serviceWakeLock != null && !serviceWakeLock.isHeld()) {
+            // Timeout: 10 Minuten. Der Lock wird in stopPlayback() / releaseServiceWakeLock()
+            // vorher freigegeben; der Timeout ist nur die letzte Absicherung.
+            serviceWakeLock.acquire(10 * 60 * 1000L);
+            Log.d(TAG, "Service-WakeLock acquired (10-min timeout)"
+                    + " | isPlaying=" + isPlaying
+                    + " | timerRunning=" + isTimerRunning);
         }
     }
 
@@ -1027,43 +1027,18 @@ public class PlaybackService extends Service {
         return Math.max(0.0f, Math.min(1.0f, base * currentTrackGain));
     }
 
-    /**
-     * Liest die aktuelle Sektions-Gain und wendet sie auf den MediaPlayer an.
-     * Wird periodisch durch sectionalGainRunnable aufgerufen.
-     */
-    private void applySectionalGain() {
-        if (currentSectionalGains == null || mediaPlayer == null || !isPlaying) return;
-        try {
-            int posMs = mediaPlayer.getCurrentPosition();
-            float sectionGain = findSectionGain(posMs);
-            float vol = Math.max(0f, Math.min(1f, currentVolume * sectionGain));
-            mediaPlayer.setVolume(vol, vol);
-            Log.d(TAG, "Sektions-Gain bei " + posMs + "ms: " + sectionGain + "×");
-        } catch (IllegalStateException e) {
-            Log.w(TAG, "applySectionalGain: IllegalStateException", e);
-        }
-    }
-
-    /**
-     * Findet den passenden Sektions-Gain-Multiplier für eine gegebene Position.
-     * Die Sektionen sind nach Startzeit sortiert gespeichert.
-     */
-    private float findSectionGain(int positionMs) {
-        if (currentSectionalGains == null || currentSectionalGains.isEmpty()) return currentTrackGain;
-        float gain = currentSectionalGains.get(0)[1];
-        for (float[] section : currentSectionalGains) {
-            if (section[0] <= positionMs) {
-                gain = section[1];
-            } else {
-                break;
-            }
-        }
-        return gain;
-    }
 
     /** Gibt den NormalizationStore zurück (für die Activity). */
     public NormalizationStore getNormalizationStore() {
         return normalizationStore;
+    }
+
+    /**
+     * Aktualisiert den Kompressor – Stub für Kompatibilität mit Settings-Dialog.
+     * DynamicsProcessing wurde entfernt (verursachte Knackser + Audio-Mute auf diesem Gerät).
+     */
+    public void updateCompressor() {
+        Log.d(TAG, "updateCompressor: DynamicsProcessing nicht aktiv");
     }
 }
 

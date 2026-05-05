@@ -77,18 +77,9 @@
 
     <!-- Normalization - additional -->
     <string name="norm_single_track">🎚️ Diesen Track normalisieren</string>
-    <string name="norm_sectional">📊 Sektionsweise normalisieren</string>
-    <string name="norm_sectional_done">✅ %1$d Sektionen analysiert</string>
-    <string name="norm_sectional_title">Sektions-Analyse läuft…</string>
-    <string name="norm_sectional_msg">Analysiere Sektion %1$d / %2$d</string>
     <string name="norm_single_done">✅ Track normalisiert (Gain: %s×)</string>
     <string name="norm_track_analysis_failed">Analyse des Tracks fehlgeschlagen.</string>
-    <string name="norm_sectional_clear">🗑️ Sektionsdaten löschen</string>
-    <string name="norm_sectional_active">📊 Sektions-Normalisierung aktiv</string>
     <string name="norm_context_title">Normalisierung</string>
-    <string name="norm_sectional_visualize">📈 Sektionen visualisieren</string>
-    <string name="norm_sectional_chart_title">Gain-Anpassungen pro Sektion</string>
-    <string name="norm_section_length_label">Sektionslänge: %d Sek.</string>
     <string name="norm_start_analysis">Analysieren</string>
 
     <!-- Meditation (4-7-8 Atemübung) -->

@@ -79,18 +79,7 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHol
                 holder.tvNormBadge.setVisibility(View.VISIBLE);
                 holder.tvNormBadge.setText("⭐ Ref");
                 holder.tvNormBadge.setTextColor(Color.parseColor("#FFD700"));
-            } else if (normStore.hasSectionalGains(uri)) {
-                // Sektionsweise normalisiert – zeige 📊 + Track-Gain falls vorhanden
-                float gain = normStore.getGain(uri);
-                float gainDb = (float)(20.0 * Math.log10(gain));
-                String label = Math.abs(gainDb) < 0.5f
-                        ? "📊 sek."
-                        : String.format("📊 %+.1fdB", gainDb);
-                holder.tvNormBadge.setVisibility(View.VISIBLE);
-                holder.tvNormBadge.setText(label);
-                holder.tvNormBadge.setTextColor(Color.parseColor("#29B6F6")); // hellblau
             } else if (normStore.hasGain(uri)) {
-                // Nur Gesamt-Gain vorhanden
                 float gain = normStore.getGain(uri);
                 float gainDb = (float)(20.0 * Math.log10(gain));
                 String label;

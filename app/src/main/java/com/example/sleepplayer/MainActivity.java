@@ -466,6 +466,143 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     /**
+     * Einstellungs-Dialog für den Dynamik-Kompressor (DynamicsProcessing, API 28+).
+     *
+     * Der Kompressor ergänzt die Track-Normalisierung:
+     *   - Normalisierung: gleicht den *mittleren* Pegel zwischen Tracks an
+     *   - Kompressor: dämpft laute und hebt leise Passagen *innerhalb* eines Tracks an
+     *
+     * Auf Geräten unter API 28 wird ein Hinweis angezeigt.
+     */
+    private void showCompressorDialog() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) {
+            new AlertDialog.Builder(this)
+                    .setTitle("🔊 Kompressor")
+                    .setMessage("Der Kompressor benötigt Android 9 (API 28). "
+                            + "Dein Gerät hat API " + android.os.Build.VERSION.SDK_INT + ".")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+
+        float dp = getResources().getDisplayMetrics().density;
+        int pad = (int)(16 * dp);
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(pad, pad / 2, pad, pad);
+
+        // --- Ein/Aus ---
+        com.google.android.material.materialswitch.MaterialSwitch swComp =
+                new com.google.android.material.materialswitch.MaterialSwitch(this);
+        swComp.setText("Kompressor aktiv");
+        swComp.setChecked(prefsManager.isCompressorEnabled());
+        swComp.setTextColor(0xFFFFFFFF);
+        root.addView(swComp);
+
+        // --- Info-Text ---
+        TextView tvInfo = new TextView(this);
+        tvInfo.setTextColor(0xFF90A4AE);
+        tvInfo.setTextSize(11f);
+        tvInfo.setPadding(0, (int)(4*dp), 0, (int)(8*dp));
+        tvInfo.setText("Dämpft laute und hebt leise Stellen an.\n"
+                + "Ergänzt die Track-Normalisierung.");
+        root.addView(tvInfo);
+
+        // --- Schwellenwert ---
+        int threshCurrent = prefsManager.getCompressorThreshold(); // –40…0
+        TextView tvThreshLabel = new TextView(this);
+        tvThreshLabel.setTextColor(0xFFB0BEC5);
+        tvThreshLabel.setTextSize(12f);
+        tvThreshLabel.setText("Schwellenwert: " + threshCurrent + " dB");
+        root.addView(tvThreshLabel);
+
+        SeekBar sbThresh = new SeekBar(this);
+        sbThresh.setMax(39); // 0 → –1 dB … 39 → –40 dB (invers: progress=0 heißt –1dB)
+        sbThresh.setProgress(-threshCurrent - 1); // –20 → progress 19
+        sbThresh.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
+                tvThreshLabel.setText("Schwellenwert: " + (-(p + 1)) + " dB");
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(sbThresh);
+
+        // --- Ratio ---
+        int ratioCurrent = prefsManager.getCompressorRatio(); // 10–80 (×10)
+        TextView tvRatioLabel = new TextView(this);
+        tvRatioLabel.setTextColor(0xFFB0BEC5);
+        tvRatioLabel.setTextSize(12f);
+        tvRatioLabel.setText("Ratio: " + (ratioCurrent / 10f) + ":1");
+        root.addView(tvRatioLabel);
+
+        SeekBar sbRatio = new SeekBar(this);
+        sbRatio.setMax(14); // 0 → 1.5:1 … 14 → 8.0:1 (steps of 0.5)
+        sbRatio.setProgress((ratioCurrent - 15) / 5); // 40 → progress 5
+        sbRatio.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
+                float r = (15 + p * 5) / 10f;
+                tvRatioLabel.setText(String.format(java.util.Locale.getDefault(),
+                        "Ratio: %.1f:1", r));
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(sbRatio);
+
+        // --- Makeup-Gain ---
+        int makeupCurrent = prefsManager.getCompressorMakeup(); // 0–18
+        TextView tvMakeupLabel = new TextView(this);
+        tvMakeupLabel.setTextColor(0xFFB0BEC5);
+        tvMakeupLabel.setTextSize(12f);
+        tvMakeupLabel.setText("Makeup-Gain: +" + makeupCurrent + " dB");
+        root.addView(tvMakeupLabel);
+
+        SeekBar sbMakeup = new SeekBar(this);
+        sbMakeup.setMax(18);
+        sbMakeup.setProgress(makeupCurrent);
+        sbMakeup.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
+                tvMakeupLabel.setText("Makeup-Gain: +" + p + " dB");
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(sbMakeup);
+
+        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
+        scrollView.addView(root);
+
+        new AlertDialog.Builder(this)
+                .setTitle("🔊 Dynamik-Kompressor")
+                .setView(scrollView)
+                .setPositiveButton("Speichern", (d, w) -> {
+                    boolean on       = swComp.isChecked();
+                    int threshold    = -(sbThresh.getProgress() + 1);
+                    int ratio        = 15 + sbRatio.getProgress() * 5;
+                    int makeup       = sbMakeup.getProgress();
+
+                    prefsManager.saveCompressorEnabled(on);
+                    prefsManager.saveCompressorThreshold(threshold);
+                    prefsManager.saveCompressorRatio(ratio);
+                    prefsManager.saveCompressorMakeup(makeup);
+
+                    // Kompressor sofort neu anwenden falls Wiedergabe läuft
+                    if (isBound && playbackService != null) {
+                        playbackService.updateCompressor();
+                    }
+
+                    Toast.makeText(this,
+                            "✅ Kompressor " + (on ? "aktiv" : "deaktiviert")
+                            + (on ? " (" + threshold + "dB, " + (ratio/10f) + ":1, +" + makeup + "dB)" : ""),
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
      * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen, TTS-Toggle und Normalisierung.
      */
     private void showSettingsMenu() {
@@ -495,6 +632,10 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
         // Meditations-Effekte
         popup.getMenu().add(0, 7, 7, "🎛️ Meditations-Effekte…");
+
+        // Kompressor
+        boolean compOn = prefsManager.isCompressorEnabled();
+        popup.getMenu().add(0, 8, 8, compOn ? "🔊 Kompressor: Ein…" : "🔊 Kompressor: Aus…");
 
         // Referenz-Info (deaktiviert, nur zur Info)
         String refTitle = normalizationStore.getReferenceTrackTitle();
@@ -533,6 +674,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                     return true;
                 case 7:
                     showMeditationEffectsDialog();
+                    return true;
+                case 8:
+                    showCompressorDialog();
                     return true;
             }
             return false;
@@ -672,15 +816,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
      * Zeigt ein Kontextmenü zum Setzen des Referenz-Tracks und Normalisierungsoptionen (nach Longpress).
      */
     private void showReferenceTrackMenu(TrackSelector.TrackInfo track) {
-        boolean hasSectional = normalizationStore.hasSectionalGains(track.uri.toString());
         java.util.List<String> items = new java.util.ArrayList<>();
         items.add(getString(R.string.norm_set_ref_confirm));
         items.add(getString(R.string.norm_single_track));
-        items.add(getString(R.string.norm_sectional));
-        if (hasSectional) {
-            items.add(getString(R.string.norm_sectional_visualize));
-            items.add(getString(R.string.norm_sectional_clear));
-        }
 
         new AlertDialog.Builder(this)
                 .setTitle(track.title)
@@ -692,76 +830,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                         Toast.makeText(this, getString(R.string.norm_ref_set, track.title), Toast.LENGTH_SHORT).show();
                     } else if (chosen.equals(getString(R.string.norm_single_track))) {
                         startSingleTrackNormalization(track);
-                    } else if (chosen.equals(getString(R.string.norm_sectional))) {
-                        startSectionalNormalization(track);
-                    } else if (chosen.equals(getString(R.string.norm_sectional_visualize))) {
-                        showSectionalGainChart(track);
-                    } else if (chosen.equals(getString(R.string.norm_sectional_clear))) {
-                        normalizationStore.clearSectionalGains(track.uri.toString());
-                        trackAdapter.notifyDataSetChanged();
-                        Toast.makeText(this, getString(R.string.norm_reset_done), Toast.LENGTH_SHORT).show();
                     }
                 })
                 .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    /**
-     * Zeigt ein Diagramm der sektionsweisen Gain-Anpassungen für einen Track.
-     * Grüne Balken = leise Stellen werden angehoben, orange = laute werden gedämpft.
-     * Eine pinke Linie zeigt die aktuelle Wiedergabeposition (falls dieser Track spielt).
-     */
-    private void showSectionalGainChart(TrackSelector.TrackInfo track) {
-        java.util.List<float[]> sections = normalizationStore.getSectionalGains(track.uri.toString());
-        if (sections == null || sections.isEmpty()) {
-            Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        SectionalGainChartView chartView = new SectionalGainChartView(this);
-        chartView.setSections(sections);
-
-        // Aktuelle Wiedergabeposition eintragen, falls dieser Track gerade spielt
-        if (isBound && playbackService != null && playbackService.getCurrentTrack() != null
-                && playbackService.getCurrentTrack().uri.toString().equals(track.uri.toString())) {
-            chartView.setCurrentPosition(playbackService.getCurrentPosition());
-        }
-
-        // Höhe: 260dp
-        int heightPx = (int)(260 * getResources().getDisplayMetrics().density);
-        chartView.setMinimumHeight(heightPx);
-
-        // Zusammenfassung unter dem Diagramm
-        int boostCount = 0, cutCount = 0, neutralCount = 0;
-        float maxBoostDb = 0f, maxCutDb = 0f;
-        for (float[] s : sections) {
-            float db = (float)(20.0 * Math.log10(Math.max(1e-6, s[1])));
-            if (db > 0.5f) { boostCount++; maxBoostDb = Math.max(maxBoostDb, db); }
-            else if (db < -0.5f) { cutCount++; maxCutDb = Math.max(maxCutDb, -db); }
-            else neutralCount++;
-        }
-        String summary = String.format(Locale.getDefault(),
-                "%d Sektionen  •  ▲ %d angehoben (max +%.1fdB)  •  ▼ %d gedämpft (max −%.1fdB)  •  %d neutral",
-                sections.size(), boostCount, maxBoostDb, cutCount, maxCutDb, neutralCount);
-
-        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
-        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
-        layout.addView(chartView);
-
-        TextView summaryView = new TextView(this);
-        summaryView.setText(summary);
-        summaryView.setTextColor(0xFF90A4AE);
-        summaryView.setTextSize(11f);
-        int pad = (int)(12 * getResources().getDisplayMetrics().density);
-        summaryView.setPadding(pad, pad/2, pad, pad);
-        layout.addView(summaryView);
-
-        new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.norm_sectional_chart_title) + "\n" + track.title)
-                .setView(layout)
-                .setPositiveButton(android.R.string.ok, null)
-                // "Neu analysieren" Shortcut
-                .setNeutralButton(getString(R.string.norm_sectional), (d, w) -> startSectionalNormalization(track))
                 .show();
     }
 
@@ -834,158 +905,12 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     /**
-     * Sektionsweise Normalisierung für einen einzelnen Track.
-     * Fragt zuerst nach der gewünschten Sektionslänge (1–30 Sek.), dann Analyse.
-     */
-    private void startSectionalNormalization(TrackSelector.TrackInfo track) {
-        String refUri = normalizationStore.getReferenceTrackUri();
-        if (refUri == null) {
-            new AlertDialog.Builder(this)
-                    .setTitle(getString(R.string.norm_menu_normalize))
-                    .setMessage(getString(R.string.norm_no_ref))
-                    .setPositiveButton(android.R.string.ok, null).show();
-            return;
-        }
-
-        // Sektionslänge-Dialog mit SeekBar (1–30 Sek.)
-        int currentSec = prefsManager.getSectionLengthSec();
-
-        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
-        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
-        int pad = (int)(16 * getResources().getDisplayMetrics().density);
-        layout.setPadding(pad, pad, pad, 0);
-
-        TextView labelView = new TextView(this);
-        labelView.setTextColor(0xFFFFFFFF);
-        labelView.setTextSize(14f);
-        labelView.setText(getString(R.string.norm_section_length_label, currentSec));
-
-        SeekBar seekBar = new SeekBar(this);
-        seekBar.setMax(29);                        // 0–29 → Sekunden 1–30
-        seekBar.setProgress(currentSec - 1);
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                labelView.setText(getString(R.string.norm_section_length_label, p + 1));
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-
-        layout.addView(labelView);
-        layout.addView(seekBar);
-
-        new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.norm_sectional))
-                .setMessage(track.title)
-                .setView(layout)
-                .setPositiveButton(getString(R.string.norm_start_analysis), (d, w) -> {
-                    int chosenSec = seekBar.getProgress() + 1;
-                    prefsManager.saveSectionLengthSec(chosenSec);
-                    runSectionalNormalization(track, chosenSec * 1000);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    /** Führt die eigentliche sektionsweise Analyse durch (nach Bestätigung der Sektionslänge). */
-    private void runSectionalNormalization(TrackSelector.TrackInfo track, int sectionLengthMs) {
-        String refUri = normalizationStore.getReferenceTrackUri();
-        if (refUri == null) {
-            new AlertDialog.Builder(this)
-                    .setTitle(getString(R.string.norm_menu_normalize))
-                    .setMessage(getString(R.string.norm_no_ref))
-                    .setPositiveButton(android.R.string.ok, null).show();
-            return;
-        }
-
-        android.widget.ProgressBar pb = new android.widget.ProgressBar(this, null,
-                android.R.attr.progressBarStyleHorizontal);
-        pb.setMax(100);
-        int pad = (int)(16 * getResources().getDisplayMetrics().density);
-        pb.setPadding(pad, pad, pad, pad);
-        AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle(R.string.norm_sectional_title)
-                .setMessage(track.title)
-                .setView(pb)
-                .setCancelable(false)
-                .create();
-        dlg.show();
-
-        new Thread(() -> {
-            // Referenz-RMS (Gesamtlevel als Ziel)
-            float refDb = Float.NaN;
-            TrackSelector selector = isBound && playbackService != null
-                    ? playbackService.getTrackSelector() : new TrackSelector(this);
-            for (TrackSelector.TrackInfo t : selector.getAllTracks()) {
-                if (t.uri.toString().equals(refUri)) {
-                    refDb = AudioAnalyzer.analyzeRmsDb(this, t.uri);
-                    break;
-                }
-            }
-            if (Float.isNaN(refDb)) {
-                final float finalRefDb = refDb;
-                runOnUiThread(() -> { dlg.dismiss();
-                    Toast.makeText(this, R.string.norm_ref_analysis_failed, Toast.LENGTH_LONG).show(); });
-                return;
-            }
-
-            final float targetDb = refDb;
-            // Sektionsweise Analyse des Tracks
-            java.util.List<float[]> sections = AudioAnalyzer.analyzeSectionsDb(
-                    this, track.uri, sectionLengthMs,
-                    p -> runOnUiThread(() -> pb.setProgress(p)));
-
-            if (sections.isEmpty()) {
-                runOnUiThread(() -> { dlg.dismiss();
-                    Toast.makeText(this, R.string.norm_track_analysis_failed, Toast.LENGTH_LONG).show(); });
-                return;
-            }
-
-            // Für jede Sektion Gain berechnen: [startMs, gainMul]
-            java.util.List<float[]> sectionalGains = new java.util.ArrayList<>();
-            for (float[] s : sections) {
-                float sectionDb = s[1];
-                float gain = Float.isNaN(sectionDb) || sectionDb <= -99f
-                        ? 1.0f
-                        : NormalizationStore.computeGainMultiplier(targetDb, sectionDb);
-                // Auf ±18 dB begrenzen
-                float maxMul = (float) Math.pow(10, NormalizationStore.MAX_GAIN_DB / 20f);
-                gain = Math.max(1f / maxMul, Math.min(maxMul, gain));
-                sectionalGains.add(new float[]{s[0], gain});
-            }
-
-            normalizationStore.saveSectionalGains(track.uri.toString(), sectionalGains);
-            final int count = sectionalGains.size();
-            runOnUiThread(() -> { dlg.dismiss(); trackAdapter.notifyDataSetChanged();
-                Toast.makeText(this, getString(R.string.norm_sectional_done, count), Toast.LENGTH_LONG).show(); });
-        }, "SectionalNormThread").start();
-    }
-
-    /**
      * Startet die Normalisierungs-Analyse für alle Tracks im Hintergrund.
      * Zeigt einen Fortschritts-Dialog und speichert die Gains danach.
      */
     private void startNormalization() {
-        // Track-Liste holen (bereits geladen im Adapter)
-        List<TrackSelector.TrackInfo> allTracks;
-        try {
-            // Tracks via TrackSelector neu laden (sicher, eigener Thread folgt)
-            TrackSelector selector = isBound && playbackService != null
-                    ? playbackService.getTrackSelector()
-                    : new TrackSelector(this);
-            allTracks = selector.getAllTracks();
-        } catch (Exception e) {
-            Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (allTracks.isEmpty()) {
-            Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         String refUri = normalizationStore.getReferenceTrackUri();
         if (refUri == null) {
-            // Kein Referenz-Track → erklärenden Dialog zeigen
             new AlertDialog.Builder(this)
                     .setTitle(getString(R.string.norm_menu_normalize))
                     .setMessage(getString(R.string.norm_no_ref))
@@ -994,23 +919,43 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             return;
         }
 
-        // Fortschritts-Dialog aufbauen
+        // Fortschritts-Dialog aufbauen (Tracks werden im Hintergrund geladen)
         ProgressBar progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(allTracks.size());
+        progressBar.setMax(100);
         progressBar.setProgress(0);
         int padding = (int) (16 * getResources().getDisplayMetrics().density);
         progressBar.setPadding(padding, padding, padding, padding);
 
         AlertDialog progressDialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.norm_progress_title)
-                .setMessage(getString(R.string.norm_progress_msg, 0, allTracks.size()))
+                .setMessage(getString(R.string.norm_progress_msg, 0, 0))
                 .setView(progressBar)
                 .setCancelable(false)
                 .create();
         progressDialog.show();
 
-        // Analyse im Hintergrund
+        // Alles im Hintergrund – kein Main-Thread I/O!
         new Thread(() -> {
+            // Track-Liste laden (MediaStore-Query → muss im Hintergrund laufen!)
+            TrackSelector selector = isBound && playbackService != null
+                    ? playbackService.getTrackSelector()
+                    : new TrackSelector(this);
+            List<TrackSelector.TrackInfo> allTracks = selector.getAllTracks();
+
+            if (allTracks.isEmpty()) {
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    Toast.makeText(this, R.string.norm_no_tracks, Toast.LENGTH_SHORT).show();
+                });
+                return;
+            }
+
+            final int total = allTracks.size();
+            runOnUiThread(() -> {
+                progressBar.setMax(total);
+                progressDialog.setMessage(getString(R.string.norm_progress_msg, 0, total));
+            });
+
             // 1) Referenz-RMS berechnen
             TrackSelector.TrackInfo refTrack = null;
             for (TrackSelector.TrackInfo t : allTracks) {
@@ -1039,7 +984,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             // 2) Alle anderen Tracks analysieren
             int analyzed = 0;
             int failed = 0;
-            final int total = allTracks.size();
 
             for (TrackSelector.TrackInfo track : allTracks) {
                 analyzed++;
@@ -1053,7 +997,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
 
                 String trackUri = track.uri.toString();
                 if (trackUri.equals(refUri)) {
-                    // Referenz selbst bekommt Gain 1.0
                     normalizationStore.saveGain(trackUri, 1.0f);
                     continue;
                 }

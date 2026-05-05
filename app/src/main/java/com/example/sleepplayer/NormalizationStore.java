@@ -4,14 +4,11 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -43,7 +40,6 @@ public class NormalizationStore {
     private static final String KEY_REF_URI   = "reference_uri";
     private static final String KEY_REF_TITLE = "reference_title";
     private static final String KEY_GAINS_JSON = "gains_json";
-    private static final String KEY_SECTIONAL_JSON = "sectional_gains_json";
 
     /** Maximaler Gain-Boost in dB (verhindert extremes Aufdrehen leiser Tracks). */
     public static final float MAX_GAIN_DB = 18f;
@@ -144,75 +140,6 @@ public class NormalizationStore {
         Log.d(TAG, "Alle Normalisierungs-Daten gelöscht");
     }
 
-    // ===== Sektionsweise Gains =====
-
-    /**
-     * Speichert sektionsweise Gain-Daten für einen Track.
-     * sections: Liste von float[2] = [sectionStartMs, gainMultiplier]
-     */
-    public void saveSectionalGains(String uri, List<float[]> sections) {
-        JSONObject root;
-        String existing = prefs.getString(KEY_SECTIONAL_JSON, "{}");
-        try { root = new JSONObject(existing); } catch (JSONException e) { root = new JSONObject(); }
-        try {
-            JSONArray arr = new JSONArray();
-            for (float[] s : sections) {
-                JSONArray pair = new JSONArray();
-                pair.put(s[0]);
-                pair.put(s[1]);
-                arr.put(pair);
-            }
-            root.put(uri, arr);
-            prefs.edit().putString(KEY_SECTIONAL_JSON, root.toString()).apply();
-            Log.d(TAG, "Sektionsdaten gespeichert: " + sections.size() + " Sektionen für " + uri);
-        } catch (JSONException e) {
-            Log.e(TAG, "Fehler beim Speichern der Sektionsdaten", e);
-        }
-    }
-
-    /**
-     * Gibt die gespeicherten Sektions-Gain-Daten für einen Track zurück.
-     * @return Liste von float[2] = [sectionStartMs, gainMultiplier], oder null wenn nicht vorhanden.
-     */
-    public List<float[]> getSectionalGains(String uri) {
-        String json = prefs.getString(KEY_SECTIONAL_JSON, "{}");
-        try {
-            JSONObject root = new JSONObject(json);
-            if (!root.has(uri)) return null;
-            JSONArray arr = root.getJSONArray(uri);
-            List<float[]> result = new ArrayList<>();
-            for (int i = 0; i < arr.length(); i++) {
-                JSONArray pair = arr.getJSONArray(i);
-                result.add(new float[]{(float) pair.getDouble(0), (float) pair.getDouble(1)});
-            }
-            return result;
-        } catch (JSONException e) {
-            Log.w(TAG, "Fehler beim Lesen der Sektionsdaten", e);
-            return null;
-        }
-    }
-
-    /** Gibt zurück ob sektionsweise Gains für diesen Track gespeichert sind. */
-    public boolean hasSectionalGains(String uri) {
-        String json = prefs.getString(KEY_SECTIONAL_JSON, "{}");
-        try {
-            return new JSONObject(json).has(uri);
-        } catch (JSONException e) {
-            return false;
-        }
-    }
-
-    /** Löscht sektionsweise Gains für einen bestimmten Track. */
-    public void clearSectionalGains(String uri) {
-        String json = prefs.getString(KEY_SECTIONAL_JSON, "{}");
-        try {
-            JSONObject root = new JSONObject(json);
-            root.remove(uri);
-            prefs.edit().putString(KEY_SECTIONAL_JSON, root.toString()).apply();
-        } catch (JSONException e) {
-            Log.w(TAG, "Fehler beim Löschen der Sektionsdaten", e);
-        }
-    }
 
     /**
      * Berechnet den Gain-Multiplier aus zwei dBFS-Werten.

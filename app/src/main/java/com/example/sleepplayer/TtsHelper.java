@@ -17,15 +17,28 @@ import java.util.Locale;
  * Verwendet die im Gerät installierte TTS-Engine (keine externe Abhängigkeit).
  * Initialisierung ist asynchron – Ansagen werden gepuffert bis die Engine bereit ist.
  * Unterstützt einen "onDone"-Callback und Lautstärkenregelung.
+ *
+ * Sicherheits-Timeout: Falls der onDone-Callback der TTS-Engine nie feuert
+ * (z.B. bei hängendem TTS-System), wird er nach TTS_TIMEOUT_MS automatisch
+ * ausgelöst – so startet der Track trotzdem.
  */
 public class TtsHelper implements TextToSpeech.OnInitListener {
 
     private static final String TAG = "TtsHelper";
     private static final String UTTERANCE_ID = "sleep_player_tts";
 
+    /** Sicherheits-Timeout: falls onDone nach dieser Zeit nicht feuert → manuell auslösen. */
+    private static final long TTS_TIMEOUT_MS = 8_000L;
+
     private TextToSpeech tts;
     private boolean ready = false;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    /** Timeout-Runnable – wird bei jedem Speak neu geplant und bei onDone abgebrochen. */
+    private final Runnable timeoutRunnable = () -> {
+        Log.w(TAG, "TTS-Timeout: onDone hat nicht gefeuert – erzwinge Callback");
+        fireOnDone();
+    };
 
     /** Puffer für Ansagen, die vor der Initialisierung angefordert wurden. */
     private String pendingText = null;
@@ -58,10 +71,13 @@ public class TtsHelper implements TextToSpeech.OnInitListener {
             // Listener für Abschluss-Callback registrieren
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override
-                public void onStart(String utteranceId) { /* nichts */ }
+                public void onStart(String utteranceId) {
+                    Log.d(TAG, "TTS onStart: " + utteranceId);
+                }
 
                 @Override
                 public void onDone(String utteranceId) {
+                    Log.d(TAG, "TTS onDone: " + utteranceId);
                     fireOnDone();
                 }
 
@@ -74,7 +90,7 @@ public class TtsHelper implements TextToSpeech.OnInitListener {
             });
 
             ready = true;
-            Log.d(TAG, "TTS bereit");
+            Log.d(TAG, "TTS bereit | pendingText=" + (pendingText != null ? "'" + pendingText + "'" : "null"));
 
             // Gepufferte Ansage nachholen
             if (pendingText != null) {
@@ -156,6 +172,7 @@ public class TtsHelper implements TextToSpeech.OnInitListener {
      * Muss in onDestroy() des Service aufgerufen werden.
      */
     public void release() {
+        mainHandler.removeCallbacks(timeoutRunnable);
         onDoneCallback = null;
         pendingOnDone = null;
         if (tts != null) {
@@ -174,22 +191,32 @@ public class TtsHelper implements TextToSpeech.OnInitListener {
         // Vorherigen Callback ersetzen (falls TTS unterbrochen wird)
         onDoneCallback = onDone;
 
+        // Alten Timeout abbrechen und neuen starten
+        mainHandler.removeCallbacks(timeoutRunnable);
+        mainHandler.postDelayed(timeoutRunnable, TTS_TIMEOUT_MS);
+
         Bundle params = new Bundle();
         // KEY_PARAM_VOLUME: 0.0 (still) bis 1.0 (volle Stream-Lautstärke)
         // Wir clampen auf [0.05, 1.0] damit die Ansage immer hörbar bleibt
         float ttsVolume = Math.max(0.05f, Math.min(1.0f, volume));
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, ttsVolume);
 
+        Log.d(TAG, "speakNow: text='" + text + "' volume=" + ttsVolume
+                + " timeout=" + TTS_TIMEOUT_MS + "ms");
         // QUEUE_FLUSH: unterbricht ggf. laufende Ansage
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID);
     }
 
-    /** Löst den gespeicherten onDone-Callback auf dem Main-Thread aus (einmalig). */
+    /** Löst den gespeicherten onDone-Callback auf dem Main-Thread aus (einmalig).
+     *  200ms Verzögerung: lässt den TTS-Audio-Stream ausklingen bevor der Track startet
+     *  und verhindert so den Knackser am Übergang. */
     private void fireOnDone() {
+        mainHandler.removeCallbacks(timeoutRunnable); // Timeout abbrechen
         Runnable cb = onDoneCallback;
         onDoneCallback = null;
         if (cb != null) {
-            mainHandler.post(cb);
+            Log.d(TAG, "fireOnDone: Callback wird ausgelöst (200ms Verzögerung)");
+            mainHandler.postDelayed(cb, 200);
         }
     }
 }

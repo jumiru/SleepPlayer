@@ -82,6 +82,13 @@ public class MeditationController {
     private int     delayMs       = 1000;
     private float   delayLevel    = 0.35f;
 
+    /**
+     * Liste aller ausstehenden Echo-Runnables.
+     * Wird vor jedem neuen Ton geleert, damit alte Echos nicht in die neue Phase
+     * hineinlaufen und SoundPool-Streams abwürgen (Knackser/Abbruch).
+     */
+    private final java.util.List<Runnable> pendingEchoRunnables = new java.util.ArrayList<>();
+
     // ===== Konstruktor =====
 
     public MeditationController(Context context, MeditationCallback callback) {
@@ -100,7 +107,9 @@ public class MeditationController {
                 .build();
 
         soundPool = new SoundPool.Builder()
-                .setMaxStreams(2)
+                // 1 Hauptton + 4 Echos + 1 Puffer = 6 gleichzeitige Streams
+                // Mit maxStreams=2 (alt) wurden bei 4 Echos Streams abgewürgt → Knackser!
+                .setMaxStreams(6)
                 .setAudioAttributes(attrs)
                 .build();
 
@@ -191,6 +200,7 @@ public class MeditationController {
         Log.d(TAG, "Meditation gestoppt");
         running = false;
         handler.removeCallbacksAndMessages(null);
+        cancelPendingEchos();
         if (soundPool != null) soundPool.autoPause();
     }
 
@@ -227,6 +237,7 @@ public class MeditationController {
         }
         cycleCount++;
         Log.d(TAG, "Zyklus " + cycleCount + " – Einatmen");
+        cancelPendingEchos(); // Echos der vorherigen Phase stoppen
         playSound(idInhale);
         if (callback != null) callback.onPhaseChanged(Phase.INHALE, cycleCount);
         handler.postDelayed(this::scheduleHold, DUR_INHALE_MS);
@@ -235,6 +246,7 @@ public class MeditationController {
     private void scheduleHold() {
         if (!running) return;
         Log.d(TAG, "Zyklus " + cycleCount + " – Halten");
+        cancelPendingEchos(); // Echos der Einatem-Phase stoppen
         playSound(idHold);
         if (callback != null) callback.onPhaseChanged(Phase.HOLD, cycleCount);
         handler.postDelayed(this::scheduleExhale, DUR_HOLD_MS);
@@ -243,6 +255,7 @@ public class MeditationController {
     private void scheduleExhale() {
         if (!running) return;
         Log.d(TAG, "Zyklus " + cycleCount + " – Ausatmen");
+        cancelPendingEchos(); // Echos der Halte-Phase stoppen
         playSound(idExhale);
         if (callback != null) callback.onPhaseChanged(Phase.EXHALE, cycleCount);
         handler.postDelayed(this::scheduleInhale, DUR_EXHALE_MS);
@@ -251,6 +264,7 @@ public class MeditationController {
     private void playEndSequence() {
         running = false;
         Log.d(TAG, "Abschluss-Sequenz");
+        cancelPendingEchos();
         playSound(idChord);
         handler.postDelayed(() -> {
             if (callback != null) {
@@ -263,18 +277,39 @@ public class MeditationController {
     private void playSound(int soundId) {
         if (soundPool == null || soundId == 0) return;
         soundPool.play(soundId, volume, volume, 1, 0, 1.0f);
-        // Delay: 4 Echos mit wachsender Verzögerung und exponentiell abnehmender Lautstärke
+        Log.d(TAG, "playSound: id=" + soundId
+                + " delay=" + delayEnabled + " delayMs=" + delayMs
+                + " level=" + delayLevel);
+        // Delay: 4 Echos mit festem Abstand und exponentiell abnehmender Lautstärke.
+        // Jedes Echo wird in pendingEchoRunnables registriert, damit es vor dem
+        // nächsten Phasenwechsel sauber abgebrochen werden kann (kein Knackser).
         if (delayEnabled && delayMs > 0) {
             for (int i = 1; i <= 4; i++) {
                 final float echoVol = volume * (float) Math.pow(delayLevel, i);
                 final long echoDelay = (long) delayMs * i;
-                handler.postDelayed(() -> {
+                Runnable echoRunnable = () -> {
                     if (soundPool != null) {
                         soundPool.play(soundId, echoVol, echoVol, 0, 0, 1.0f);
                     }
-                }, echoDelay);
+                };
+                pendingEchoRunnables.add(echoRunnable);
+                handler.postDelayed(echoRunnable, echoDelay);
             }
         }
     }
-}
 
+    /**
+     * Bricht alle noch ausstehenden Echo-Runnables ab und leert die Liste.
+     * Verhindert dass Echos einer alten Phase in die neue hineinlaufen und
+     * dabei SoundPool-Streams abwürgen (was Knackser und Abbrüche verursacht).
+     */
+    private void cancelPendingEchos() {
+        for (Runnable r : pendingEchoRunnables) {
+            handler.removeCallbacks(r);
+        }
+        if (!pendingEchoRunnables.isEmpty()) {
+            Log.d(TAG, "cancelPendingEchos: " + pendingEchoRunnables.size() + " Echos abgebrochen");
+        }
+        pendingEchoRunnables.clear();
+    }
+}

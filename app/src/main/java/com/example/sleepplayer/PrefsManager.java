@@ -23,7 +23,12 @@ public class PrefsManager {
     private static final String KEY_FOLDER_DISPLAY = "folder_display_name";
     private static final String KEY_RANDOM_MODE = "random_mode";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
-    private static final String KEY_SECTION_LENGTH_SEC   = "section_length_sec";
+
+    // --- Kompressor ---
+    private static final String KEY_COMP_ENABLED   = "comp_enabled";
+    private static final String KEY_COMP_THRESHOLD = "comp_threshold"; // dB, -40…0
+    private static final String KEY_COMP_RATIO     = "comp_ratio";     // 1…10 (×10 gespeichert)
+    private static final String KEY_COMP_MAKEUP    = "comp_makeup";    // dB, 0…18
 
     // --- Meditations-Effekte ---
     private static final String KEY_MED_REVERB_ENABLED = "med_reverb_enabled";
@@ -137,21 +142,6 @@ public class PrefsManager {
         return prefs.getBoolean(KEY_TTS_ENABLED, true);
     }
 
-    // --- Sektionslänge für dynamische Normalisierung ---
-
-    /**
-     * Speichert die Sektionslänge in Sekunden (1–30).
-     */
-    public void saveSectionLengthSec(int seconds) {
-        prefs.edit().putInt(KEY_SECTION_LENGTH_SEC, Math.max(1, Math.min(30, seconds))).apply();
-    }
-
-    /**
-     * Gibt die gespeicherte Sektionslänge zurück (Standard: 30 Sek).
-     */
-    public int getSectionLengthSec() {
-        return prefs.getInt(KEY_SECTION_LENGTH_SEC, 30);
-    }
 
     // --- Meditations-Effekte ---
 
@@ -210,6 +200,24 @@ public class PrefsManager {
         JSONArray arr = new JSONArray(recent);
         prefs.edit().putString(KEY_RECENT_TRACKS, arr.toString()).apply();
     }
+
+    // --- Kompressor ---
+
+    public void saveCompressorEnabled(boolean on)    { prefs.edit().putBoolean(KEY_COMP_ENABLED, on).apply(); }
+    /** Standard: aus – opt-in Feature. */
+    public boolean isCompressorEnabled()             { return prefs.getBoolean(KEY_COMP_ENABLED, false); }
+
+    /** Schwellenwert in dB (–40…0). Standard: –20 dB */
+    public void saveCompressorThreshold(int db)      { prefs.edit().putInt(KEY_COMP_THRESHOLD, db).apply(); }
+    public int  getCompressorThreshold()             { return prefs.getInt(KEY_COMP_THRESHOLD, -20); }
+
+    /** Ratio ×10 gespeichert, also 20 = 2.0:1 … 80 = 8.0:1. Standard: 40 = 4:1 */
+    public void saveCompressorRatio(int ratioTimes10) { prefs.edit().putInt(KEY_COMP_RATIO, ratioTimes10).apply(); }
+    public int  getCompressorRatio()                  { return prefs.getInt(KEY_COMP_RATIO, 40); }
+
+    /** Makeup-Gain in dB (0…18). Standard: 6 dB */
+    public void saveCompressorMakeup(int db)         { prefs.edit().putInt(KEY_COMP_MAKEUP, db).apply(); }
+    public int  getCompressorMakeup()                { return prefs.getInt(KEY_COMP_MAKEUP, 6); }
 }
 
 
