@@ -1,64 +1,80 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Lotus / Meditation Symbol: stilisierter sitzender Mensch mit Aura-Kreis -->
+<!-- Meditierender Mensch im Lotus-Sitz mit Aura -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
 
-    <!-- Äußerer Kreis (Aura) -->
+    <!-- Aura-Kreis -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.5"
         android:fillColor="#00000000"
-        android:pathData="M12,2 A10,10 0 1,1 11.99,2 Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.2"
+        android:pathData="M12,2 A10,10 0 1,0 12,22 A10,10 0 1,0 12,2 Z" />
 
     <!-- Kopf -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M12,5.5 A1.5,1.5 0 1,1 11.99,5.5 Z" />
+        android:pathData="M12,6.5 A1.6,1.6 0 1,0 12,3.3 A1.6,1.6 0 1,0 12,6.5 Z" />
 
-    <!-- Körper: sitzende Position -->
+    <!-- Rumpf (leicht geschwungen) -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M12,8.5 L12,13" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M12,8 C11.5,10 11.5,12 12,13.5" />
 
-    <!-- Linker Arm / Bein -->
+    <!-- Linker Arm: geschwungen nach außen-unten auf linkes Knie -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M12,13 L8,15.5" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M12,9.5 C10,10.5 8,12 7.5,14" />
 
-    <!-- Rechter Arm / Bein -->
+    <!-- Rechter Arm: geschwungen nach außen-unten auf rechtes Knie -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M12,13 L16,15.5" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M12,9.5 C14,10.5 16,12 16.5,14" />
 
-    <!-- Verbindungslinie Beine (Lotus-Sitz) -->
+    <!-- Linkes Bein: gebogen im Schneidersitz -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M7,16.5 L17,16.5" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M12,13.5 C10.5,14 8.5,14.5 6.5,15.5" />
 
-    <!-- Linke Hand (ruht auf Knie) -->
+    <!-- Rechtes Bein: gebogen im Schneidersitz -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M12,13.5 C13.5,14 15.5,14.5 17.5,15.5" />
+
+    <!-- Lotussitz-Basis: geschwungene Linie unten -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M6.5,15.5 C8,16.5 10,17 12,17 C14,17 16,16.5 17.5,15.5" />
+
+    <!-- Linker Fuß -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M7.5,16 A0.8,0.8 0 1,1 7.49,16 Z" />
+        android:pathData="M6.5,15.5 A0.9,0.9 0 1,0 6.5,13.7 A0.9,0.9 0 1,0 6.5,15.5 Z" />
 
-    <!-- Rechte Hand (ruht auf Knie) -->
+    <!-- Rechter Fuß -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M16.5,16 A0.8,0.8 0 1,1 16.49,16 Z" />
+        android:pathData="M17.5,15.5 A0.9,0.9 0 1,0 17.5,13.7 A0.9,0.9 0 1,0 17.5,15.5 Z" />
 
 </vector>
 

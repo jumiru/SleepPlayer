@@ -43,7 +43,7 @@
     <!-- Random / Sequential mode -->
     <string name="random_mode">Wiedergabe-Modus</string>
     <string name="mode_random">🔀 Zufall</string>
-    <string name="mode_sequential">🔁 Wiederholen</string>
+    <string name="mode_sequential">🔁 Loop</string>
 
     <!-- Folder selection -->
     <string name="folder_label">Audio-Ordner</string>

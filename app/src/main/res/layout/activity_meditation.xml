@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF0A0E1A">
+
+    <!-- Gesamtzeit oben links -->
+    <TextView
+        android:id="@+id/tvElapsedTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="20dp"
+        android:fontFamily="monospace"
+        android:text="0:00"
+        android:textColor="#AA03DAC6"
+        android:textSize="14sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Zyklen-Zähler oben rechts -->
+    <TextView
+        android:id="@+id/tvCycleCount"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:layout_marginEnd="24dp"
+        android:text="Zyklus 0"
+        android:textColor="#AA03DAC6"
+        android:textSize="14sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Guideline bei 42% für die Kreismitte -->
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guidelineCircle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.42" />
+
+    <!-- Äußerer Glow-Ring (größer, sehr transparent) -->
+    <View
+        android:id="@+id/viewOuterGlow"
+        android:layout_width="300dp"
+        android:layout_height="300dp"
+        android:background="@drawable/breathing_circle_outer"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/guidelineCircle"
+        app:layout_constraintBottom_toBottomOf="@id/guidelineCircle" />
+
+    <!-- Innerer Atem-Kreis -->
+    <View
+        android:id="@+id/viewBreathCircle"
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:background="@drawable/breathing_circle"
+        app:layout_constraintBottom_toBottomOf="@id/viewOuterGlow"
+        app:layout_constraintEnd_toEndOf="@id/viewOuterGlow"
+        app:layout_constraintStart_toStartOf="@id/viewOuterGlow"
+        app:layout_constraintTop_toTopOf="@id/viewOuterGlow" />
+
+    <!-- Emoji / Icon der Phase (oberes Drittel des Kreises) -->
+    <TextView
+        android:id="@+id/tvPhaseIcon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🌙"
+        android:textSize="40sp"
+        app:layout_constraintEnd_toEndOf="@id/viewBreathCircle"
+        app:layout_constraintStart_toStartOf="@id/viewBreathCircle"
+        app:layout_constraintTop_toTopOf="@id/viewBreathCircle"
+        android:layout_marginTop="28dp" />
+
+    <!-- Countdown-Zahl (groß, unterer Bereich des Kreises) -->
+    <TextView
+        android:id="@+id/tvPhaseCountdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:text="–"
+        android:textColor="#FFFFFFFF"
+        android:textSize="42sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="@id/viewBreathCircle"
+        app:layout_constraintStart_toStartOf="@id/viewBreathCircle"
+        app:layout_constraintBottom_toBottomOf="@id/viewBreathCircle"
+        android:layout_marginBottom="28dp" />
+
+    <!-- Phasenname (unterhalb des Kreises) -->
+    <TextView
+        android:id="@+id/tvPhaseName"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:letterSpacing="0.15"
+        android:text="VORBEREITUNG"
+        android:textColor="#FFFFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/viewOuterGlow" />
+
+    <!-- Kurze Beschreibung -->
+    <TextView
+        android:id="@+id/tvPhaseDesc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Mach es dir bequem …"
+        android:textColor="#8803DAC6"
+        android:textSize="13sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tvPhaseName" />
+
+    <!-- 4-7-8 Hinweis (nur bei Vorbereitung sichtbar) -->
+    <TextView
+        android:id="@+id/tvRhythm"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="4 · 7 · 8  Atemübung"
+        android:textColor="#4403DAC6"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tvPhaseDesc" />
+
+    <!-- Stopp-Button + Kalender-Button unten -->
+    <LinearLayout
+        android:id="@+id/llBottomButtons"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="36dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <!-- Fortsetzen-Button (nur bei Pause sichtbar) -->
+        <Button
+            android:id="@+id/btnResume"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:text="▶ Fortsetzen"
+            android:textColor="#FF0A0E1A"
+            android:backgroundTint="#03DAC6"
+            android:stateListAnimator="@null"
+            android:visibility="gone" />
+
+        <!-- Meditation beenden -->
+        <Button
+            android:id="@+id/btnStopMeditation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:text="Meditation beenden"
+            android:textColor="#FF0A0E1A"
+            android:backgroundTint="#03DAC6"
+            android:stateListAnimator="@null"
+            style="@style/Widget.AppCompat.Button" />
+
+        <!-- Kalender / Verlauf -->
+        <Button
+            android:id="@+id/btnCalendar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:text="📅  Verlauf anzeigen"
+            android:textColor="#AA03DAC6"
+            android:background="@android:color/transparent"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+

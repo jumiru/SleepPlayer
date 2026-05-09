@@ -320,9 +320,18 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         btnMeditation.setOnClickListener(v -> {
             ensureServiceStarted();
             if (isBound && playbackService != null) {
-                playbackService.toggleMeditation();
+                if (!playbackService.isMeditating()) {
+                    // Meditation starten + sofort zur MeditationActivity wechseln
+                    playbackService.startMeditation();
+                    startActivity(new Intent(this, MeditationActivity.class));
+                } else {
+                    playbackService.stopMeditation();
+                }
             } else {
-                pendingServiceAction = () -> playbackService.toggleMeditation();
+                pendingServiceAction = () -> {
+                    playbackService.startMeditation();
+                    startActivity(new Intent(this, MeditationActivity.class));
+                };
             }
         });
 
@@ -1215,13 +1224,16 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             MeditationController.Phase phase, int cycle) {
         runOnUiThread(() -> {
             if (active) {
-                // Meditation aktiv: voll sichtbar + türkis eingefärbt
                 btnMeditation.setAlpha(1.0f);
                 btnMeditation.setColorFilter(
                         ContextCompat.getColor(this, R.color.teal_200),
                         android.graphics.PorterDuff.Mode.SRC_IN);
+                // Headphone-Doppelklick: Activity öffnen wenn erster Zyklus beginnt
+                // und MainActivity noch im Vordergrund (callback aktiv)
+                if (cycle == 1 && phase == MeditationController.Phase.INHALE) {
+                    startActivity(new Intent(this, MeditationActivity.class));
+                }
             } else {
-                // Meditation inaktiv: gedimmt + keine Färbung
                 btnMeditation.setAlpha(0.6f);
                 btnMeditation.clearColorFilter();
             }

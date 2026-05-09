@@ -57,6 +57,7 @@ public class PlaybackService extends Service {
     private AudioFocusRequest audioFocusRequest;
     private TrackSelector trackSelector;
     private PrefsManager prefsManager;
+    private MeditationLog meditationLog;
 
     private CountDownTimer sleepTimer;
     private long timerMillisRemaining = 0;
@@ -124,6 +125,21 @@ public class PlaybackService extends Service {
         default void onMeditationStateChanged(boolean active, MeditationController.Phase phase, int cycle) {}
     }
 
+    /**
+     * Callback-Interface für die MeditationActivity (Animations-UI).
+     * Wird von der Activity registriert solange sie sichtbar ist.
+     */
+    public interface MeditationUICallback {
+        void onMeditationPhaseChanged(MeditationController.Phase phase, int cycle);
+        void onMeditationDone();
+    }
+
+    private volatile MeditationUICallback meditationUICallback;
+
+    public void setMeditationUICallback(MeditationUICallback cb) {
+        meditationUICallback = cb;
+    }
+
     public class LocalBinder extends Binder {
         public PlaybackService getService() {
             return PlaybackService.this;
@@ -136,6 +152,7 @@ public class PlaybackService extends Service {
         Log.d(TAG, "Service created (instance=" + System.identityHashCode(this) + ")");
 
         prefsManager = new PrefsManager(this);
+        meditationLog = new MeditationLog(this);
         trackSelector = new TrackSelector(this);
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         normalizationStore = new NormalizationStore(this);
@@ -148,6 +165,9 @@ public class PlaybackService extends Service {
                 if (callback != null) {
                     callback.onMeditationStateChanged(true, phase, cycle);
                 }
+                if (meditationUICallback != null) {
+                    meditationUICallback.onMeditationPhaseChanged(phase, cycle);
+                }
             }
             @Override
             public void onMeditationFinished() {
@@ -155,6 +175,9 @@ public class PlaybackService extends Service {
                 if (callback != null) {
                     callback.onMeditationStateChanged(false,
                             MeditationController.Phase.FINISHED, 0);
+                }
+                if (meditationUICallback != null) {
+                    meditationUICallback.onMeditationDone();
                 }
                 // Automatisch zurück in den normalen Schlafmodus wechseln
                 showSleepModeNotification();
@@ -652,8 +675,13 @@ public class PlaybackService extends Service {
         float vol = Math.max(0.30f, currentVolume);
         meditationController.start(vol);
 
+        // Sitzung für heute loggen
+        meditationLog.logToday();
+
         // Notification aktualisieren
         showMeditationNotification();
+        // Die MeditationActivity wird von MainActivity.onMeditationStateChanged() gestartet,
+        // da Activity-Starts aus dem Service auf Android 10+ eingeschränkt sind.
     }
 
     /** Stoppt die Atemübung. */

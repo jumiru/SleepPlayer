@@ -209,6 +209,16 @@ public class MeditationController {
         return running;
     }
 
+    /** Maximale Anzahl Zyklen (Schätzung basierend auf Gesamtdauer). */
+    public static int getMaxCycles() {
+        return (int) (MEDITATION_DURATION_MS / getCycleDurationMs());
+    }
+
+    /** Aktueller Zyklen-Zähler. */
+    public int getCycleCount() {
+        return cycleCount;
+    }
+
     /** Gesamtdauer eines Zyklus in ms. */
     public static long getCycleDurationMs() {
         return DUR_INHALE_MS + DUR_HOLD_MS + DUR_EXHALE_MS;

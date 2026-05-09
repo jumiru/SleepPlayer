@@ -34,6 +34,17 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".MeditationActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".CalendarActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <service
             android:name=".PlaybackService"
             android:exported="false"
