@@ -320,18 +320,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         btnMeditation.setOnClickListener(v -> {
             ensureServiceStarted();
             if (isBound && playbackService != null) {
-                if (!playbackService.isMeditating()) {
-                    // Meditation starten + sofort zur MeditationActivity wechseln
-                    playbackService.startMeditation();
-                    startActivity(new Intent(this, MeditationActivity.class));
-                } else {
-                    playbackService.stopMeditation();
-                }
+                playbackService.toggleMeditation();
             } else {
-                pendingServiceAction = () -> {
-                    playbackService.startMeditation();
-                    startActivity(new Intent(this, MeditationActivity.class));
-                };
+                pendingServiceAction = () -> playbackService.toggleMeditation();
             }
         });
 
@@ -1223,22 +1214,10 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     public void onMeditationStateChanged(boolean active,
             MeditationController.Phase phase, int cycle) {
         runOnUiThread(() -> {
-            if (active) {
-                btnMeditation.setAlpha(1.0f);
-                btnMeditation.setColorFilter(
-                        ContextCompat.getColor(this, R.color.teal_200),
-                        android.graphics.PorterDuff.Mode.SRC_IN);
-                // Headphone-Doppelklick: Activity öffnen wenn erster Zyklus beginnt
-                // und MainActivity noch im Vordergrund (callback aktiv)
-                if (cycle == 1 && phase == MeditationController.Phase.INHALE) {
-                    startActivity(new Intent(this, MeditationActivity.class));
-                }
-            } else {
-                btnMeditation.setAlpha(0.6f);
-                btnMeditation.clearColorFilter();
+            updateMeditationButtonState(active);
+            if (active && phase == MeditationController.Phase.PREPARE) {
+                openMeditationActivity();
             }
-            btnMeditation.setContentDescription(
-                    getString(active ? R.string.meditation_stop : R.string.meditation_start));
         });
     }
 
@@ -1278,6 +1257,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         } else {
             tvTimerRemaining.setText(R.string.timer_off);
         }
+
+        updateMeditationButtonState(playbackService.isMeditating());
     }
 
     // ===== Hilfsmethoden =====
@@ -1314,6 +1295,25 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         long minutes = totalSeconds / 60;
         long seconds = totalSeconds % 60;
         return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
+    }
+
+    private void updateMeditationButtonState(boolean active) {
+        btnMeditation.setAlpha(active ? 1.0f : 0.6f);
+        if (active) {
+            btnMeditation.setColorFilter(
+                    ContextCompat.getColor(this, R.color.teal_200),
+                    android.graphics.PorterDuff.Mode.SRC_IN);
+        } else {
+            btnMeditation.clearColorFilter();
+        }
+        btnMeditation.setContentDescription(
+                getString(active ? R.string.meditation_stop : R.string.meditation_start));
+    }
+
+    private void openMeditationActivity() {
+        Intent intent = new Intent(this, MeditationActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
     }
 
     /**

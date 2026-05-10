@@ -53,6 +53,7 @@ public class MeditationActivity extends AppCompatActivity
 
     private PlaybackService playbackService;
     private boolean isBound = false;
+    private boolean returningToMain = false;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private AnimatorSet currentAnimator;
@@ -84,6 +85,7 @@ public class MeditationActivity extends AppCompatActivity
             playbackService = ((PlaybackService.LocalBinder) binder).getService();
             isBound = true;
             playbackService.setMeditationUICallback(MeditationActivity.this);
+            syncFromService();
         }
         @Override
         public void onServiceDisconnected(ComponentName name) {
@@ -166,9 +168,10 @@ public class MeditationActivity extends AppCompatActivity
     }
 
     private void stopAndFinish() {
-        if (isBound && playbackService != null) playbackService.stopMeditation();
-        bringMainActivityToFront();
-        finish();
+        if (isBound && playbackService != null) {
+            playbackService.stopMeditation();
+        }
+        finishToMain();
     }
 
     /**
@@ -190,6 +193,7 @@ public class MeditationActivity extends AppCompatActivity
             int maxCycles = MeditationController.getMaxCycles();
             tvCycleCount.setText("Zyklus " + cycle + " von " + maxCycles);
             switch (phase) {
+                case PREPARE:  showPrepareState();   break;
                 case INHALE:   showInhale();      break;
                 case HOLD:     showHold();        break;
                 case EXHALE:   showExhale();      break;
@@ -203,11 +207,17 @@ public class MeditationActivity extends AppCompatActivity
         runOnUiThread(this::showFinishState);
     }
 
+    @Override
+    public void onMeditationStopped() {
+        runOnUiThread(this::finishToMain);
+    }
+
     // ===== Phasen =====
 
 
     private void showPrepareState() {
         cancelAnimators();
+        tvCycleCount.setText("Zyklus 0 von " + MeditationController.getMaxCycles());
         tvPhaseIcon.setText("🌙");
         tvPhaseName.setText("VORBEREITUNG");
         tvPhaseDesc.setText("Mach es dir bequem …");
@@ -268,9 +278,28 @@ public class MeditationActivity extends AppCompatActivity
         startPulsing(0.7f, 0.85f, 1800);
         // Nach 5 Sekunden automatisch zur MainActivity zurückkehren
         handler.postDelayed(() -> {
-            bringMainActivityToFront();
-            finish();
+            finishToMain();
         }, 5000);
+    }
+
+    private void syncFromService() {
+        if (playbackService == null) return;
+        if (!playbackService.isMeditating()) {
+            finishToMain();
+            return;
+        }
+
+        MeditationController.Phase phase = playbackService.getCurrentMeditationPhase();
+        int cycle = playbackService.getCurrentMeditationCycle();
+        onMeditationPhaseChanged(phase, cycle);
+    }
+
+    private void finishToMain() {
+        if (returningToMain) return;
+        returningToMain = true;
+        handler.removeCallbacksAndMessages(null);
+        bringMainActivityToFront();
+        finish();
     }
 
     // ===== Animations-Helfer =====

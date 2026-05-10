@@ -51,7 +51,7 @@ public class MeditationController {
 
     // --- Öffentliche Typen ---
 
-    public enum Phase { INHALE, HOLD, EXHALE, FINISHED }
+    public enum Phase { PREPARE, INHALE, HOLD, EXHALE, FINISHED }
 
     public interface MeditationCallback {
         void onPhaseChanged(Phase phase, int cycleNumber);
@@ -76,6 +76,7 @@ public class MeditationController {
     private long             startTimeMs = 0;
     private int              cycleCount  = 0;
     private float            volume      = 0.5f;
+    private volatile Phase   currentPhase = Phase.FINISHED;
 
     // Effekt-Einstellungen (werden bei start() aus PrefsManager geladen)
     private boolean delayEnabled  = true;
@@ -175,6 +176,7 @@ public class MeditationController {
         running     = true;
         startTimeMs = System.currentTimeMillis();
         cycleCount  = 0;
+        currentPhase = Phase.PREPARE;
 
         // Effekt-Einstellungen aus Prefs laden
         delayEnabled = prefs.isMeditationDelayEnabled();
@@ -191,6 +193,9 @@ public class MeditationController {
                 + " reverb=" + prefs.isMeditationReverbEnabled()
                 + " delay=" + delayEnabled + " delayMs=" + delayMs + ")");
 
+        if (callback != null) {
+            callback.onPhaseChanged(Phase.PREPARE, cycleCount);
+        }
         playSound(idChord);
         handler.postDelayed(this::scheduleInhale, INTRO_PAUSE_MS);
     }
@@ -199,6 +204,7 @@ public class MeditationController {
     public void stop() {
         Log.d(TAG, "Meditation gestoppt");
         running = false;
+        currentPhase = Phase.FINISHED;
         handler.removeCallbacksAndMessages(null);
         cancelPendingEchos();
         if (soundPool != null) soundPool.autoPause();
@@ -217,6 +223,11 @@ public class MeditationController {
     /** Aktueller Zyklen-Zähler. */
     public int getCycleCount() {
         return cycleCount;
+    }
+
+    /** Aktuelle Meditationsphase für späte UI-Bindings. */
+    public Phase getCurrentPhase() {
+        return currentPhase;
     }
 
     /** Gesamtdauer eines Zyklus in ms. */
@@ -246,6 +257,7 @@ public class MeditationController {
             return;
         }
         cycleCount++;
+        currentPhase = Phase.INHALE;
         Log.d(TAG, "Zyklus " + cycleCount + " – Einatmen");
         cancelPendingEchos(); // Echos der vorherigen Phase stoppen
         playSound(idInhale);
@@ -255,6 +267,7 @@ public class MeditationController {
 
     private void scheduleHold() {
         if (!running) return;
+        currentPhase = Phase.HOLD;
         Log.d(TAG, "Zyklus " + cycleCount + " – Halten");
         cancelPendingEchos(); // Echos der Einatem-Phase stoppen
         playSound(idHold);
@@ -264,6 +277,7 @@ public class MeditationController {
 
     private void scheduleExhale() {
         if (!running) return;
+        currentPhase = Phase.EXHALE;
         Log.d(TAG, "Zyklus " + cycleCount + " – Ausatmen");
         cancelPendingEchos(); // Echos der Halte-Phase stoppen
         playSound(idExhale);
@@ -273,6 +287,7 @@ public class MeditationController {
 
     private void playEndSequence() {
         running = false;
+        currentPhase = Phase.FINISHED;
         Log.d(TAG, "Abschluss-Sequenz");
         cancelPendingEchos();
         playSound(idChord);

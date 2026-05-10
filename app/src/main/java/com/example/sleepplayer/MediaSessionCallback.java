@@ -58,7 +58,7 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
 
     @Override
     public void onStop() {
-        service.stopPlayback();
+        service.stopAllPlaybackAndMeditation();
     }
 
     @Override
@@ -115,7 +115,7 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
                 service.skipToNext();
                 return true;
             } else if (keyCode == KeyEvent.KEYCODE_MEDIA_STOP) {
-                service.stopPlayback();
+                service.stopAllPlaybackAndMeditation();
                 return true;
             }
         }

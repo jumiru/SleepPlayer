@@ -2,7 +2,9 @@ package com.example.sleepplayer;
 
 import android.app.Notification;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
@@ -132,9 +134,28 @@ public class PlaybackService extends Service {
     public interface MeditationUICallback {
         void onMeditationPhaseChanged(MeditationController.Phase phase, int cycle);
         void onMeditationDone();
+        void onMeditationStopped();
     }
 
     private volatile MeditationUICallback meditationUICallback;
+
+    private final BroadcastReceiver noisyAudioReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(android.content.Context context, Intent intent) {
+            if (intent == null || !AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                return;
+            }
+
+            boolean hasActiveAudio = isPlaying || isMeditating() || mediaPlayer != null || currentTrack != null;
+            if (!hasActiveAudio) {
+                Log.d(TAG, "Kopfhörer entfernt, aber nichts aktiv – ignoriere");
+                return;
+            }
+
+            Log.d(TAG, "Kopfhörer entfernt – stoppe Wiedergabe und Meditation");
+            stopAllPlaybackAndMeditation();
+        }
+    };
 
     public void setMeditationUICallback(MeditationUICallback cb) {
         meditationUICallback = cb;
@@ -186,6 +207,13 @@ public class PlaybackService extends Service {
 
         // Notification Channel erstellen
         NotificationHelper.createChannel(this);
+
+        IntentFilter noisyIntentFilter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(noisyAudioReceiver, noisyIntentFilter, RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(noisyAudioReceiver, noisyIntentFilter);
+        }
 
         // Service-WakeLock initialisieren (noch nicht acquiren)
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -253,11 +281,11 @@ public class PlaybackService extends Service {
             if (NotificationHelper.ACTION_PLAY_PAUSE.equals(action)) {
                 togglePlayPause();
             } else if (NotificationHelper.ACTION_STOP.equals(action)) {
-                stopPlayback();
+                stopAllPlaybackAndMeditation();
             } else if (NotificationHelper.ACTION_DISMISS.equals(action)) {
                 // Nutzer hat die Sleep-Mode-Notification weggewischt → Service vollständig beenden
                 Log.d(TAG, "ACTION_DISMISS empfangen – Service wird beendet");
-                stopPlayback();
+                stopAllPlaybackAndMeditation();
             } else {
                 // Könnte ein MediaButton-Intent sein
                 MediaButtonReceiver.handleIntent(mediaSession, intent);
@@ -282,6 +310,11 @@ public class PlaybackService extends Service {
         if (ttsHelper != null) {
             ttsHelper.release();
             ttsHelper = null;
+        }
+        try {
+            unregisterReceiver(noisyAudioReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // Receiver war bereits abgemeldet oder nie registriert
         }
         if (meditationController != null) {
             meditationController.release();
@@ -635,6 +668,42 @@ public class PlaybackService extends Service {
         stopSelf();
     }
 
+    /** Stoppt sowohl Track-Wiedergabe als auch Meditation und beendet den Service. */
+    public void stopAllPlaybackAndMeditation() {
+        Log.d(TAG, "stopAllPlaybackAndMeditation()");
+
+        boolean wasMeditating = isMeditating();
+        int meditationCycle = meditationController != null ? meditationController.getCycleCount() : 0;
+
+        if (wasMeditating && meditationController != null) {
+            meditationController.stop();
+            if (callback != null) {
+                callback.onMeditationStateChanged(false,
+                        MeditationController.Phase.FINISHED, meditationCycle);
+            }
+            if (meditationUICallback != null) {
+                meditationUICallback.onMeditationStopped();
+            }
+        }
+
+        stopTimerInternal();
+        releaseMediaPlayer();
+        isPlaying = false;
+        currentTrack = null;
+        abandonAudioFocus();
+        releaseServiceWakeLock();
+
+        updatePlaybackState(PlaybackStateCompat.STATE_STOPPED);
+
+        if (callback != null) {
+            callback.onPlaybackStateChanged(false);
+            callback.onTimerFinished();
+        }
+
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
+    }
+
     /**
      * Springt zum nächsten zufälligen Track.
      */
@@ -662,6 +731,10 @@ public class PlaybackService extends Service {
     public void startMeditation() {
         Log.d(TAG, "startMeditation()");
 
+        if (meditationController == null || meditationController.isRunning()) {
+            return;
+        }
+
         // Sleep-Timer stoppen – darf während Meditation nicht die Notification überschreiben
         stopTimerInternal();
 
@@ -680,17 +753,24 @@ public class PlaybackService extends Service {
 
         // Notification aktualisieren
         showMeditationNotification();
-        // Die MeditationActivity wird von MainActivity.onMeditationStateChanged() gestartet,
-        // da Activity-Starts aus dem Service auf Android 10+ eingeschränkt sind.
+        // Die MeditationActivity wird von MainActivity.onMeditationStateChanged() gestartet.
+        // Durch den PREPARE-Callback passiert das jetzt sofort und identisch für UI/Headset.
     }
 
     /** Stoppt die Atemübung. */
     public void stopMeditation() {
         Log.d(TAG, "stopMeditation()");
+        if (meditationController == null || !meditationController.isRunning()) {
+            return;
+        }
+        int cycle = meditationController.getCycleCount();
         meditationController.stop();
         if (callback != null) {
             callback.onMeditationStateChanged(false,
-                    MeditationController.Phase.FINISHED, 0);
+                    MeditationController.Phase.FINISHED, cycle);
+        }
+        if (meditationUICallback != null) {
+            meditationUICallback.onMeditationStopped();
         }
         // Schlafmodus-Notification wiederherstellen
         showSleepModeNotification();
@@ -699,6 +779,18 @@ public class PlaybackService extends Service {
     /** Gibt zurück ob die Atemübung gerade läuft. */
     public boolean isMeditating() {
         return meditationController != null && meditationController.isRunning();
+    }
+
+    /** Aktuelle Meditationsphase für Activities, die sich verspätet verbinden. */
+    public MeditationController.Phase getCurrentMeditationPhase() {
+        return meditationController != null
+                ? meditationController.getCurrentPhase()
+                : MeditationController.Phase.FINISHED;
+    }
+
+    /** Aktueller Meditationszyklus für spätes UI-Sync. */
+    public int getCurrentMeditationCycle() {
+        return meditationController != null ? meditationController.getCycleCount() : 0;
     }
 
     /**
