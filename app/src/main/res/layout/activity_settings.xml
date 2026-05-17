@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/dark_background">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:background="@color/dark_surface">
+
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_back"
+            android:scaleType="centerInside"
+            android:contentDescription="@string/back"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/settings_title"
+            android:textSize="20sp"
+            android:textColor="@color/white"
+            android:paddingStart="16dp" />
+
+    </LinearLayout>
+
+    <!-- Scrollable Content -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Ordner & TTS -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/dark_surface"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp"
+                android:layout_marginTop="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📁 Musikordner &amp; Audio"
+                    android:textColor="@color/teal_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnFolderSelect"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="@string/settings_folder_title"
+                    android:textColor="@color/white"
+                    android:backgroundTint="@color/dark_accent" />
+
+            </LinearLayout>
+
+            <!-- Normalisierung -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/dark_surface"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🎚️ Normalisierung"
+                    android:textColor="@color/teal_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnNormalization"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="@string/norm_menu_normalize"
+                    android:textColor="@color/white"
+                    android:backgroundTint="@color/dark_accent" />
+
+            </LinearLayout>
+
+            <!-- Meditation Effects -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/dark_surface"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🎛️ Meditations-Effekte"
+                    android:textColor="@color/teal_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnMeditationEffects"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="Reverb &amp; Delay"
+                    android:textColor="@color/white"
+                    android:backgroundTint="@color/dark_accent" />
+
+            </LinearLayout>
+
+            <!-- Kompressor -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/dark_surface"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔊 Dynamik-Kompressor"
+                    android:textColor="@color/teal_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnCompressor"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="Kompressor-Einstellungen"
+                    android:textColor="@color/white"
+                    android:backgroundTint="@color/dark_accent" />
+
+            </LinearLayout>
+
+            <!-- Debug Logs -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/dark_surface"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📋 Debug Logs"
+                    android:textColor="@color/teal_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnLogs"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="Logs anzeigen &amp; teilen"
+                    android:textColor="@color/white"
+                    android:backgroundTint="@color/dark_accent" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </ScrollView>
+
+</LinearLayout>
+
+

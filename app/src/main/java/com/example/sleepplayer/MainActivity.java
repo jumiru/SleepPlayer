@@ -21,6 +21,7 @@ import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.PopupMenu;
@@ -85,6 +86,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private ImageButton btnMeditation;
     private TextView tvTrackCount;
     private RecyclerView recyclerTracks;
+    private EditText etSearch;
 
     // Vollbild-Overlay für Album Art
     private View overlayAlbumArt;
@@ -140,14 +142,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 // Optional, Notification funktioniert auch ohne auf manchen Geräten
             });
 
-    // Ordner-Picker Launcher (SAF = Storage Access Framework)
-    private final ActivityResultLauncher<Uri> folderPickerLauncher =
-            registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
-                if (uri != null) {
-                    onFolderSelected(uri);
-                }
-            });
-
     private final ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -188,6 +182,10 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         }
 
         setContentView(R.layout.activity_main);
+
+        // Logging initialisieren
+        LogManager logManager = LogManager.getInstance(this);
+        logManager.log("MainActivity", "App gestartet – initialisiere...");
 
         prefsManager = new PrefsManager(this);
         normalizationStore = new NormalizationStore(this);
@@ -306,6 +304,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         btnMeditation = findViewById(R.id.btnMeditation);
         tvTrackCount = findViewById(R.id.tvTrackCount);
         recyclerTracks = findViewById(R.id.recyclerTracks);
+        etSearch = findViewById(R.id.etSearch);
         overlayAlbumArt = findViewById(R.id.overlayAlbumArt);
         ivAlbumArtFull = findViewById(R.id.ivAlbumArtFull);
         seekProgress = findViewById(R.id.seekProgress);
@@ -350,6 +349,15 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 // Aktualisierung wieder starten
                 progressHandler.post(progressRunnable);
             }
+        });
+
+        // Suchfeld: Liste live einschränken
+        etSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                trackAdapter.filter(s.toString());
+            }
+            @Override public void afterTextChanged(android.text.Editable s) {}
         });
     }
 
@@ -462,354 +470,136 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     // ===== Settings-Button / Ordner-Auswahl =====
 
     private void setupSettingsButton() {
-        btnSettings.setOnClickListener(v -> showSettingsMenu());
+        btnSettings.setOnClickListener(v -> openSettingsActivity());
     }
 
-    /**
-     * Einstellungs-Dialog für den Dynamik-Kompressor (DynamicsProcessing, API 28+).
-     *
-     * Der Kompressor ergänzt die Track-Normalisierung:
-     *   - Normalisierung: gleicht den *mittleren* Pegel zwischen Tracks an
-     *   - Kompressor: dämpft laute und hebt leise Passagen *innerhalb* eines Tracks an
-     *
-     * Auf Geräten unter API 28 wird ein Hinweis angezeigt.
-     */
-    private void showCompressorDialog() {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) {
-            new AlertDialog.Builder(this)
-                    .setTitle("🔊 Kompressor")
-                    .setMessage("Der Kompressor benötigt Android 9 (API 28). "
-                            + "Dein Gerät hat API " + android.os.Build.VERSION.SDK_INT + ".")
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
-            return;
-        }
-
-        float dp = getResources().getDisplayMetrics().density;
-        int pad = (int)(16 * dp);
-
-        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
-        root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setPadding(pad, pad / 2, pad, pad);
-
-        // --- Ein/Aus ---
-        com.google.android.material.materialswitch.MaterialSwitch swComp =
-                new com.google.android.material.materialswitch.MaterialSwitch(this);
-        swComp.setText("Kompressor aktiv");
-        swComp.setChecked(prefsManager.isCompressorEnabled());
-        swComp.setTextColor(0xFFFFFFFF);
-        root.addView(swComp);
-
-        // --- Info-Text ---
-        TextView tvInfo = new TextView(this);
-        tvInfo.setTextColor(0xFF90A4AE);
-        tvInfo.setTextSize(11f);
-        tvInfo.setPadding(0, (int)(4*dp), 0, (int)(8*dp));
-        tvInfo.setText("Dämpft laute und hebt leise Stellen an.\n"
-                + "Ergänzt die Track-Normalisierung.");
-        root.addView(tvInfo);
-
-        // --- Schwellenwert ---
-        int threshCurrent = prefsManager.getCompressorThreshold(); // –40…0
-        TextView tvThreshLabel = new TextView(this);
-        tvThreshLabel.setTextColor(0xFFB0BEC5);
-        tvThreshLabel.setTextSize(12f);
-        tvThreshLabel.setText("Schwellenwert: " + threshCurrent + " dB");
-        root.addView(tvThreshLabel);
-
-        SeekBar sbThresh = new SeekBar(this);
-        sbThresh.setMax(39); // 0 → –1 dB … 39 → –40 dB (invers: progress=0 heißt –1dB)
-        sbThresh.setProgress(-threshCurrent - 1); // –20 → progress 19
-        sbThresh.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
-                tvThreshLabel.setText("Schwellenwert: " + (-(p + 1)) + " dB");
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-        root.addView(sbThresh);
-
-        // --- Ratio ---
-        int ratioCurrent = prefsManager.getCompressorRatio(); // 10–80 (×10)
-        TextView tvRatioLabel = new TextView(this);
-        tvRatioLabel.setTextColor(0xFFB0BEC5);
-        tvRatioLabel.setTextSize(12f);
-        tvRatioLabel.setText("Ratio: " + (ratioCurrent / 10f) + ":1");
-        root.addView(tvRatioLabel);
-
-        SeekBar sbRatio = new SeekBar(this);
-        sbRatio.setMax(14); // 0 → 1.5:1 … 14 → 8.0:1 (steps of 0.5)
-        sbRatio.setProgress((ratioCurrent - 15) / 5); // 40 → progress 5
-        sbRatio.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
-                float r = (15 + p * 5) / 10f;
-                tvRatioLabel.setText(String.format(java.util.Locale.getDefault(),
-                        "Ratio: %.1f:1", r));
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-        root.addView(sbRatio);
-
-        // --- Makeup-Gain ---
-        int makeupCurrent = prefsManager.getCompressorMakeup(); // 0–18
-        TextView tvMakeupLabel = new TextView(this);
-        tvMakeupLabel.setTextColor(0xFFB0BEC5);
-        tvMakeupLabel.setTextSize(12f);
-        tvMakeupLabel.setText("Makeup-Gain: +" + makeupCurrent + " dB");
-        root.addView(tvMakeupLabel);
-
-        SeekBar sbMakeup = new SeekBar(this);
-        sbMakeup.setMax(18);
-        sbMakeup.setProgress(makeupCurrent);
-        sbMakeup.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
-                tvMakeupLabel.setText("Makeup-Gain: +" + p + " dB");
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-        root.addView(sbMakeup);
-
-        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
-        scrollView.addView(root);
-
-        new AlertDialog.Builder(this)
-                .setTitle("🔊 Dynamik-Kompressor")
-                .setView(scrollView)
-                .setPositiveButton("Speichern", (d, w) -> {
-                    boolean on       = swComp.isChecked();
-                    int threshold    = -(sbThresh.getProgress() + 1);
-                    int ratio        = 15 + sbRatio.getProgress() * 5;
-                    int makeup       = sbMakeup.getProgress();
-
-                    prefsManager.saveCompressorEnabled(on);
-                    prefsManager.saveCompressorThreshold(threshold);
-                    prefsManager.saveCompressorRatio(ratio);
-                    prefsManager.saveCompressorMakeup(makeup);
-
-                    // Kompressor sofort neu anwenden falls Wiedergabe läuft
-                    if (isBound && playbackService != null) {
-                        playbackService.updateCompressor();
-                    }
-
-                    Toast.makeText(this,
-                            "✅ Kompressor " + (on ? "aktiv" : "deaktiviert")
-                            + (on ? " (" + threshold + "dB, " + (ratio/10f) + ":1, +" + makeup + "dB)" : ""),
-                            Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+    private void openSettingsActivity() {
+        Intent intent = new Intent(this, SettingsActivity.class);
+        startActivity(intent);
     }
 
-    /**
-     * Zeigt ein PopupMenu mit Ordner-Auswahl-Optionen, TTS-Toggle und Normalisierung.
-     */
-    private void showSettingsMenu() {
-        PopupMenu popup = new PopupMenu(this, btnSettings);
+    // ===== Permissions =====
 
-        // Aktuellen Ordner als erstes (deaktiviertes) Item anzeigen
-        String folderName = prefsManager.getFolderDisplayName();
-        String folderLabel = (folderName != null)
-                ? getString(R.string.settings_folder_title) + ": " + folderName
-                : getString(R.string.settings_folder_title) + ": " + getString(R.string.folder_all);
-        popup.getMenu().add(0, 0, 0, folderLabel).setEnabled(false);
-        popup.getMenu().add(0, 1, 1, getString(R.string.settings_folder_select));
-        popup.getMenu().add(0, 2, 2, getString(R.string.settings_folder_clear))
-                .setEnabled(folderName != null);
-
-        // TTS-Toggle
-        boolean ttsEnabled = prefsManager.isTtsEnabled();
-        popup.getMenu().add(0, 3, 3,
-                ttsEnabled ? getString(R.string.tts_on) : getString(R.string.tts_off));
-
-        // Normalisierung – "Normalisieren" immer aktiv (zeigt eigene Hinweise wenn nötig),
-        // "Zurücksetzen" nur aktiv wenn überhaupt Gain-Daten vorhanden
-        popup.getMenu().add(0, 4, 4, getString(R.string.norm_menu_normalize))
-                .setEnabled(true);
-        popup.getMenu().add(0, 5, 5, getString(R.string.norm_menu_reset))
-                .setEnabled(!normalizationStore.getAllGains().isEmpty());
-
-        // Meditations-Effekte
-        popup.getMenu().add(0, 7, 7, "🎛️ Meditations-Effekte…");
-
-        // Kompressor
-        boolean compOn = prefsManager.isCompressorEnabled();
-        popup.getMenu().add(0, 8, 8, compOn ? "🔊 Kompressor: Ein…" : "🔊 Kompressor: Aus…");
-
-        // Referenz-Info (deaktiviert, nur zur Info)
-        String refTitle = normalizationStore.getReferenceTrackTitle();
-        if (refTitle != null) {
-            popup.getMenu().add(0, 6, 6, "⭐ " + getString(R.string.norm_ref_label) + ": " + refTitle)
-                    .setEnabled(false);
+    private void checkPermissions() {
+        // Audio Permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO);
+            } else {
+                loadTracks();
+            }
         } else {
-            popup.getMenu().add(0, 6, 6, getString(R.string.norm_ref_hint))
-                    .setEnabled(false);
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE);
+            } else {
+                loadTracks();
+            }
         }
 
-        popup.setOnMenuItemClickListener(item -> {
-            switch (item.getItemId()) {
-                case 1:
-                    folderPickerLauncher.launch(null);
-                    return true;
-                case 2:
-                    prefsManager.clearFolder();
-                    loadTracks();
-                    Toast.makeText(this, R.string.folder_all, Toast.LENGTH_SHORT).show();
-                    return true;
-                case 3:
-                    boolean newTts = !prefsManager.isTtsEnabled();
-                    prefsManager.saveTtsEnabled(newTts);
-                    Toast.makeText(this,
-                            newTts ? R.string.tts_on : R.string.tts_off,
-                            Toast.LENGTH_SHORT).show();
-                    return true;
-                case 4:
-                    startNormalization();
-                    return true;
-                case 5:
-                    normalizationStore.clearGains();
-                    trackAdapter.notifyDataSetChanged();
-                    Toast.makeText(this, R.string.norm_reset_done, Toast.LENGTH_SHORT).show();
-                    return true;
-                case 7:
-                    showMeditationEffectsDialog();
-                    return true;
-                case 8:
-                    showCompressorDialog();
-                    return true;
+        // Notification Permission (API 33+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
             }
-            return false;
-        });
-        popup.show();
+        }
+    }
+
+    private void loadTracks() {
+        // MediaStore-Query im Hintergrund laden (kein Main-Thread I/O)
+        new Thread(() -> {
+            TrackSelector selector = new TrackSelector(this);
+            selector.clearCache();
+            List<TrackSelector.TrackInfo> tracks = selector.getAllTracks();
+            runOnUiThread(() -> {
+                trackAdapter.setTracks(tracks);
+                tvTrackCount.setText(String.format(Locale.getDefault(),
+                        getString(R.string.tracks_found), tracks.size()));
+                if (tracks.isEmpty()) {
+                    tvTrackName.setText(R.string.no_audio_files);
+                } else {
+                    // Zufälligen Track vorauswählen und im UI anzeigen,
+                    // falls gerade nichts spielt – so sieht der Nutzer sofort
+                    // welcher Track beim ersten Play-Druck gestartet wird.
+                    boolean nothingPlaying = !isBound
+                            || playbackService == null
+                            || playbackService.getCurrentTrack() == null;
+                    if (nothingPlaying) {
+                        int idx = (int) (Math.random() * tracks.size());
+                        TrackSelector.TrackInfo preselected = tracks.get(idx);
+                        tvTrackName.setText(preselected.title);
+                        tvTrackArtist.setText(preselected.artist);
+                        updateAlbumArt(preselected);
+                    }
+                }
+            });
+        }, "LoadTracks").start();
+    }
+
+    // ===== Playback Controls =====
+
+    private void onPlayPauseClicked() {
+        ensureServiceStarted();
+        if (isBound && playbackService != null) {
+            playbackService.togglePlayPause();
+        } else {
+            // Service startet gerade async – Aktion merken und in onServiceConnected ausführen
+            pendingServiceAction = () -> playbackService.togglePlayPause();
+        }
+    }
+
+    private void onSkipClicked() {
+        ensureServiceStarted();
+        if (isBound && playbackService != null) {
+            playbackService.skipToNext();
+        } else {
+            pendingServiceAction = () -> playbackService.skipToNext();
+        }
+    }
+
+    /** Setzt den aktuellen Titel auf Position 0 zurück (Anfang des Tracks). */
+    private void onRestartTrackClicked() {
+        ensureServiceStarted();
+        if (isBound && playbackService != null) {
+            playbackService.seekTo(0);
+        } else {
+            pendingServiceAction = () -> playbackService.seekTo(0);
+        }
     }
 
     /**
-     * Einstellungs-Dialog für Meditations-Audioeffekte (Reverb + Delay).
-     * Verwendet MaterialSwitch für zuverlässiges Toggle-Verhalten im dunklen Theme.
+     * Stellt sicher, dass der Service gestartet und gebunden ist.
      */
-    private void showMeditationEffectsDialog() {
-        float dp = getResources().getDisplayMetrics().density;
-        int pad = (int)(16 * dp);
+    private void ensureServiceStarted() {
+        Intent intent = new Intent(this, PlaybackService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
 
-        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
-        root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setPadding(pad, pad / 2, pad, pad);
+        if (!isBound) {
+            bindService(intent, serviceConnection, BIND_AUTO_CREATE);
+        }
+    }
 
-        // Helper: Abschnitts-Überschrift
-        java.util.function.Consumer<String> addHeader = text -> {
-            TextView tv = new TextView(this);
-            tv.setText(text);
-            tv.setTextColor(0xFF90CAF9);
-            tv.setTextSize(13f);
-            tv.setTypeface(null, android.graphics.Typeface.BOLD);
-            tv.setPadding(0, (int)(10*dp), 0, 4);
-            root.addView(tv);
-        };
+    // ===== PlaybackCallback Implementierung =====
 
-        // Helper: Switch-Zeile (Label links, Switch rechts)
-        android.widget.LinearLayout[] switchRowHolder = new android.widget.LinearLayout[2];
-        // Wir bauen die Rows inline
-
-        // ===== REVERB =====
-        addHeader.accept("🏛️ Reverb (Raumhall)");
-
-        boolean reverbOn = prefsManager.isMeditationReverbEnabled();
-        com.google.android.material.materialswitch.MaterialSwitch swReverb =
-                new com.google.android.material.materialswitch.MaterialSwitch(this);
-        swReverb.setText("Reverb aktiv");
-        swReverb.setChecked(reverbOn);
-        swReverb.setTextColor(0xFFFFFFFF);
-        root.addView(swReverb);
-
-        int decayCurrent = Math.max(500, prefsManager.getMeditationReverbDecay());
-        TextView tvDecayLabel = new TextView(this);
-        tvDecayLabel.setTextColor(0xFFB0BEC5);
-        tvDecayLabel.setTextSize(12f);
-        tvDecayLabel.setText("Nachhallzeit: " + decayCurrent + " ms");
-        root.addView(tvDecayLabel);
-
-        SeekBar sbDecay = new SeekBar(this);
-        sbDecay.setMax(110); // 0 → 500 ms … 110 → 6050 ms (50 ms Schritte)
-        sbDecay.setProgress(Math.max(0, (decayCurrent - 500) / 50));
-        sbDecay.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
-                tvDecayLabel.setText("Nachhallzeit: " + (500 + p * 50) + " ms");
+    @Override
+    public void onTrackChanged(TrackSelector.TrackInfo track) {
+        runOnUiThread(() -> {
+            if (track != null) {
+                tvTrackName.setText(track.title);
+                tvTrackArtist.setText(track.artist);
+                updateAlbumArt(track);
             }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
+            // Fortschritt zurücksetzen bis die neue Position eintrifft
+            seekProgress.setProgress(0);
+            tvCurrentPosition.setText("0:00");
+            tvTrackDurationLabel.setText(formatMs(track != null ? track.duration : 0));
         });
-        root.addView(sbDecay);
-
-        // ===== DELAY =====
-        addHeader.accept("🔁 Delay (Echo × 4)");
-
-        boolean delayOn = prefsManager.isMeditationDelayEnabled();
-        com.google.android.material.materialswitch.MaterialSwitch swDelay =
-                new com.google.android.material.materialswitch.MaterialSwitch(this);
-        swDelay.setText("Delay aktiv");
-        swDelay.setChecked(delayOn);
-        swDelay.setTextColor(0xFFFFFFFF);
-        root.addView(swDelay);
-
-        int delayCurrent = Math.max(100, prefsManager.getMeditationDelayMs());
-        TextView tvDelayMsLabel = new TextView(this);
-        tvDelayMsLabel.setTextColor(0xFFB0BEC5);
-        tvDelayMsLabel.setTextSize(12f);
-        tvDelayMsLabel.setText("Delay-Zeit: " + delayCurrent + " ms");
-        root.addView(tvDelayMsLabel);
-
-        SeekBar sbDelayMs = new SeekBar(this);
-        sbDelayMs.setMax(38); // 0 → 100 ms … 38 → 1990 ms (50 ms Schritte)
-        sbDelayMs.setProgress(Math.max(0, (delayCurrent - 100) / 50));
-        sbDelayMs.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
-                tvDelayMsLabel.setText("Delay-Zeit: " + (100 + p * 50) + " ms");
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-        root.addView(sbDelayMs);
-
-        int levelCurrent = prefsManager.getMeditationDelayLevel();
-        TextView tvDelayLvlLabel = new TextView(this);
-        tvDelayLvlLabel.setTextColor(0xFFB0BEC5);
-        tvDelayLvlLabel.setTextSize(12f);
-        tvDelayLvlLabel.setText("Echo-Lautstärke: " + levelCurrent + " %");
-        root.addView(tvDelayLvlLabel);
-
-        SeekBar sbDelayLvl = new SeekBar(this);
-        sbDelayLvl.setMax(100);
-        sbDelayLvl.setProgress(levelCurrent);
-        sbDelayLvl.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
-                tvDelayLvlLabel.setText("Echo-Lautstärke: " + p + " %");
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-        root.addView(sbDelayLvl);
-
-        // ScrollView damit alles auf kleinen Bildschirmen erreichbar ist
-        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
-        scrollView.addView(root);
-
-        new AlertDialog.Builder(this)
-                .setTitle("🎛�� Meditations-Effekte")
-                .setView(scrollView)
-                .setPositiveButton("Speichern", (d, w) -> {
-                    prefsManager.saveMeditationReverbEnabled(swReverb.isChecked());
-                    prefsManager.saveMeditationReverbDecay(500 + sbDecay.getProgress() * 50);
-                    prefsManager.saveMeditationDelayEnabled(swDelay.isChecked());
-                    prefsManager.saveMeditationDelayMs(100 + sbDelayMs.getProgress() * 50);
-                    prefsManager.saveMeditationDelayLevel(sbDelayLvl.getProgress());
-                    Toast.makeText(this,
-                            "✅ Reverb " + (swReverb.isChecked() ? "an" : "aus")
-                            + "  •  Delay " + (swDelay.isChecked() ? "an" : "aus"),
-                            Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
     }
 
     /**
@@ -1057,130 +847,6 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         return treeUri.getLastPathSegment();
     }
 
-    // ===== Permissions =====
-
-    private void checkPermissions() {
-        // Audio Permission
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED) {
-                requestPermissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO);
-            } else {
-                loadTracks();
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                requestPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE);
-            } else {
-                loadTracks();
-            }
-        }
-
-        // Notification Permission (API 33+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
-            }
-        }
-    }
-
-    private void loadTracks() {
-        // MediaStore-Query im Hintergrund laden (kein Main-Thread I/O)
-        new Thread(() -> {
-            TrackSelector selector = new TrackSelector(this);
-            selector.clearCache();
-            List<TrackSelector.TrackInfo> tracks = selector.getAllTracks();
-            runOnUiThread(() -> {
-                trackAdapter.setTracks(tracks);
-                tvTrackCount.setText(String.format(Locale.getDefault(),
-                        getString(R.string.tracks_found), tracks.size()));
-                if (tracks.isEmpty()) {
-                    tvTrackName.setText(R.string.no_audio_files);
-                } else {
-                    // Zufälligen Track vorauswählen und im UI anzeigen,
-                    // falls gerade nichts spielt – so sieht der Nutzer sofort
-                    // welcher Track beim ersten Play-Druck gestartet wird.
-                    boolean nothingPlaying = !isBound
-                            || playbackService == null
-                            || playbackService.getCurrentTrack() == null;
-                    if (nothingPlaying) {
-                        int idx = (int) (Math.random() * tracks.size());
-                        TrackSelector.TrackInfo preselected = tracks.get(idx);
-                        tvTrackName.setText(preselected.title);
-                        tvTrackArtist.setText(preselected.artist);
-                        updateAlbumArt(preselected);
-                    }
-                }
-            });
-        }, "LoadTracks").start();
-    }
-
-    // ===== Playback Controls =====
-
-    private void onPlayPauseClicked() {
-        ensureServiceStarted();
-        if (isBound && playbackService != null) {
-            playbackService.togglePlayPause();
-        } else {
-            // Service startet gerade async – Aktion merken und in onServiceConnected ausführen
-            pendingServiceAction = () -> playbackService.togglePlayPause();
-        }
-    }
-
-    private void onSkipClicked() {
-        ensureServiceStarted();
-        if (isBound && playbackService != null) {
-            playbackService.skipToNext();
-        } else {
-            pendingServiceAction = () -> playbackService.skipToNext();
-        }
-    }
-
-    /** Setzt den aktuellen Titel auf Position 0 zurück (Anfang des Tracks). */
-    private void onRestartTrackClicked() {
-        ensureServiceStarted();
-        if (isBound && playbackService != null) {
-            playbackService.seekTo(0);
-        } else {
-            pendingServiceAction = () -> playbackService.seekTo(0);
-        }
-    }
-
-    /**
-     * Stellt sicher, dass der Service gestartet und gebunden ist.
-     */
-    private void ensureServiceStarted() {
-        Intent intent = new Intent(this, PlaybackService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent);
-        } else {
-            startService(intent);
-        }
-
-        if (!isBound) {
-            bindService(intent, serviceConnection, BIND_AUTO_CREATE);
-        }
-    }
-
-    // ===== PlaybackCallback Implementierung =====
-
-    @Override
-    public void onTrackChanged(TrackSelector.TrackInfo track) {
-        runOnUiThread(() -> {
-            if (track != null) {
-                tvTrackName.setText(track.title);
-                tvTrackArtist.setText(track.artist);
-                updateAlbumArt(track);
-            }
-            // Fortschritt zurücksetzen bis die neue Position eintrifft
-            seekProgress.setProgress(0);
-            tvCurrentPosition.setText("0:00");
-            tvTrackDurationLabel.setText(formatMs(track != null ? track.duration : 0));
-        });
-    }
-
     @Override
     public void onPlaybackStateChanged(boolean isPlaying) {
         runOnUiThread(() -> {
@@ -1384,4 +1050,5 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         }
     }
 }
+
 

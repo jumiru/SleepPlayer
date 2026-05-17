@@ -12,6 +12,8 @@
     <string name="now_playing">Spielt: %s</string>
     <string name="album_art_desc">Album-Cover</string>
     <string name="settings">Einstellungen</string>
+    <string name="settings_title">⚙️ Einstellungen</string>
+    <string name="back">Zurück</string>
     <string name="settings_folder_title">Audio-Ordner</string>
     <string name="settings_folder_select">Ordner wählen…</string>
     <string name="settings_folder_clear">Ordner-Filter zurücksetzen</string>
@@ -56,6 +58,7 @@
     <string name="tts_enabled">Zeitansage beim Start</string>
     <string name="tts_on">✅ Zeitansage: Ein</string>
     <string name="tts_off">🔇 Zeitansage: Aus</string>
+    <string name="tts_toggle">🔔 Zeitansage umschalten</string>
 
     <!-- Normalization -->
     <string name="norm_menu_normalize">🎚️ Tracks normalisieren…</string>

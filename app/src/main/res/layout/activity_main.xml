@@ -320,6 +320,28 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- ===== Suchfeld ===== -->
+        <EditText
+            android:id="@+id/etSearch"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="8dp"
+            android:background="@color/surface"
+            android:drawableStart="@drawable/ic_search"
+            android:drawablePadding="8dp"
+            android:hint="Suche…"
+            android:textColorHint="#80FFFFFF"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:inputType="text"
+            android:imeOptions="actionSearch"
+            android:singleLine="true"
+            app:layout_constraintTop_toBottomOf="@id/cardTimer"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
         <!-- ===== Track-Anzahl ===== -->
         <TextView
             android:id="@+id/tvTrackCount"
@@ -328,7 +350,7 @@
             android:layout_marginTop="8dp"
             android:textSize="12sp"
             android:textColor="#80FFFFFF"
-            app:layout_constraintTop_toBottomOf="@id/cardTimer"
+            app:layout_constraintTop_toBottomOf="@id/etSearch"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             tools:text="42 Titel gefunden" />

@@ -275,6 +275,9 @@ public class PlaybackService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        LogManager logManager = LogManager.getInstance(this);
+        logManager.log(TAG, "Service onStartCommand aufgerufen");
+
         if (intent != null) {
             String action = intent.getAction();
 

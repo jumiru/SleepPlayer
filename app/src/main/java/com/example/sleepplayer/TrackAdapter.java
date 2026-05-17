@@ -26,6 +26,7 @@ import java.util.List;
  */
 public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHolder> {
 
+    private List<TrackSelector.TrackInfo> allTracks = new ArrayList<>();
     private List<TrackSelector.TrackInfo> tracks = new ArrayList<>();
     private OnTrackClickListener listener;
     private OnTrackLongClickListener longClickListener;
@@ -52,7 +53,26 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.TrackViewHol
     }
 
     public void setTracks(List<TrackSelector.TrackInfo> tracks) {
-        this.tracks = tracks != null ? tracks : new ArrayList<>();
+        this.allTracks = tracks != null ? new ArrayList<>(tracks) : new ArrayList<>();
+        this.tracks = new ArrayList<>(this.allTracks);
+        notifyDataSetChanged();
+    }
+
+    /** Filtert die Liste live nach Titel oder Künstler. Leerer String zeigt alle. */
+    public void filter(String query) {
+        if (query == null || query.trim().isEmpty()) {
+            tracks = new ArrayList<>(allTracks);
+        } else {
+            String lower = query.trim().toLowerCase(java.util.Locale.getDefault());
+            List<TrackSelector.TrackInfo> filtered = new ArrayList<>();
+            for (TrackSelector.TrackInfo t : allTracks) {
+                if (t.title.toLowerCase(java.util.Locale.getDefault()).contains(lower)
+                        || t.artist.toLowerCase(java.util.Locale.getDefault()).contains(lower)) {
+                    filtered.add(t);
+                }
+            }
+            tracks = filtered;
+        }
         notifyDataSetChanged();
     }
 
