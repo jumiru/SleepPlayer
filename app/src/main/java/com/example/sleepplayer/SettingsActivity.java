@@ -3,7 +3,10 @@ package com.example.sleepplayer;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ImageButton;
@@ -33,6 +36,7 @@ public class SettingsActivity extends AppCompatActivity {
     private Button btnNormalization;
     private Button btnMeditationEffects;
     private Button btnCompressor;
+    private Button btnBatteryOptimization;
     private Button btnLogs;
 
     private PrefsManager prefsManager;
@@ -68,6 +72,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnNormalization = findViewById(R.id.btnNormalization);
         btnMeditationEffects = findViewById(R.id.btnMeditationEffects);
         btnCompressor = findViewById(R.id.btnCompressor);
+        btnBatteryOptimization = findViewById(R.id.btnBatteryOptimization);
         btnLogs = findViewById(R.id.btnLogs);
     }
 
@@ -77,11 +82,35 @@ public class SettingsActivity extends AppCompatActivity {
         btnNormalization.setOnClickListener(v -> showNormalizationDialog());
         btnMeditationEffects.setOnClickListener(v -> showMeditationEffectsDialog());
         btnCompressor.setOnClickListener(v -> showCompressorDialog());
+        btnBatteryOptimization.setOnClickListener(v -> checkBatteryOptimization());
         btnLogs.setOnClickListener(v -> openLogActivity());
     }
 
     private void openLogActivity() {
         startActivity(new Intent(this, LogActivity.class));
+    }
+
+    private void checkBatteryOptimization() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            Toast.makeText(this, "Nicht erforderlich auf diesem Android", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
+            Toast.makeText(this, getString(R.string.battery_opt_ok), Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.battery_opt_dialog_title))
+                .setMessage(getString(R.string.battery_opt_dialog_msg))
+                .setPositiveButton(getString(R.string.battery_opt_open_settings), (d, w) -> {
+                    Intent intent = new Intent(
+                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /**

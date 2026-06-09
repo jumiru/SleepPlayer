@@ -45,6 +45,9 @@ public class PlaybackService extends Service {
     /** Dauer des Fade-outs in Millisekunden (letzte 60 Sekunden vor Timer-Ende). */
     private static final long FADE_OUT_DURATION_MS = 60_000L;
 
+    /** Intervall für den Sleep-Mode-Heartbeat (hält MediaSession im Doze-Mode "warm"). */
+    private static final long SLEEP_HEARTBEAT_INTERVAL_MS = 3 * 60 * 1000L;
+
     // Binder für Activity-Kommunikation
     private final IBinder binder = new LocalBinder();
 
@@ -106,6 +109,9 @@ public class PlaybackService extends Service {
      * noch aktiv) gehalten; wird nur in stopPlayback() / onDestroy() freigegeben.
      */
     private PowerManager.WakeLock serviceWakeLock;
+
+    private final Handler sleepHeartbeatHandler = new Handler(Looper.getMainLooper());
+    private final Runnable sleepHeartbeatRunnable = () -> runSleepHeartbeat();
 
     private TrackSelector.TrackInfo currentTrack;
 
@@ -308,6 +314,7 @@ public class PlaybackService extends Service {
     public void onDestroy() {
         Log.d(TAG, "Service destroyed (instance=" + System.identityHashCode(this) + ")");
         ioExecutor.shutdownNow();
+        stopSleepHeartbeat();
         stopTimerInternal();
         releaseMediaPlayer();
         if (ttsHelper != null) {
@@ -425,6 +432,7 @@ public class PlaybackService extends Service {
             Log.w(TAG, "playTrackInternal: track ist null, abgebrochen");
             return;
         }
+        stopSleepHeartbeat();
         // Generation inkrementieren → macht alle laufenden async-Anfragen ungültig
         playbackGeneration++;
         Log.d(TAG, "playTrackInternal: " + track.title + " / " + track.artist
@@ -653,6 +661,7 @@ public class PlaybackService extends Service {
      */
     public void stopPlayback() {
         Log.d(TAG, "stopPlayback()");
+        stopSleepHeartbeat();
         stopTimerInternal();
         releaseMediaPlayer();
         isPlaying = false;
@@ -674,6 +683,7 @@ public class PlaybackService extends Service {
     /** Stoppt sowohl Track-Wiedergabe als auch Meditation und beendet den Service. */
     public void stopAllPlaybackAndMeditation() {
         Log.d(TAG, "stopAllPlaybackAndMeditation()");
+        stopSleepHeartbeat();
 
         boolean wasMeditating = isMeditating();
         int meditationCycle = meditationController != null ? meditationController.getCycleCount() : 0;
@@ -740,6 +750,7 @@ public class PlaybackService extends Service {
 
         // Sleep-Timer stoppen – darf während Meditation nicht die Notification überschreiben
         stopTimerInternal();
+        stopSleepHeartbeat();
 
         // Musik anhalten und Audio-Focus freigeben, damit Meditations-Töne ungestört spielen
         if (isPlaying) {
@@ -1088,6 +1099,29 @@ public class PlaybackService extends Service {
         mediaSession.setMetadata(metadata);
     }
 
+    private void startSleepHeartbeat() {
+        sleepHeartbeatHandler.removeCallbacks(sleepHeartbeatRunnable);
+        sleepHeartbeatHandler.postDelayed(sleepHeartbeatRunnable, SLEEP_HEARTBEAT_INTERVAL_MS);
+        Log.d(TAG, "Sleep-Heartbeat gestartet (" + SLEEP_HEARTBEAT_INTERVAL_MS / 1000 + "s Intervall)");
+    }
+
+    private void stopSleepHeartbeat() {
+        sleepHeartbeatHandler.removeCallbacks(sleepHeartbeatRunnable);
+    }
+
+    /** Wird alle 3 Minuten im Sleep-Mode aufgerufen – hält die MediaSession im Doze-Mode aktiv. */
+    private void runSleepHeartbeat() {
+        if (isPlaying || isMeditating()) {
+            return;
+        }
+        Log.d(TAG, "Sleep-Heartbeat: MediaSession auffrischen");
+        if (mediaSession != null) {
+            mediaSession.setActive(true);
+            updatePlaybackState(PlaybackStateCompat.STATE_PAUSED);
+        }
+        sleepHeartbeatHandler.postDelayed(sleepHeartbeatRunnable, SLEEP_HEARTBEAT_INTERVAL_MS);
+    }
+
     private void showNotification() {
         String title = currentTrack != null ? currentTrack.title : "SleepPlayer";
         Notification notification = NotificationHelper.buildNotification(
@@ -1100,6 +1134,11 @@ public class PlaybackService extends Service {
      * Hält die MediaSession aktiv → Kopfhörer-Tasten weiterhin nutzbar.
      */
     private void showSleepModeNotification() {
+        // MediaSession explizit re-aktivieren – nach langem Idle kann die System-Priorität sinken
+        if (mediaSession != null) {
+            mediaSession.setActive(true);
+        }
+        startSleepHeartbeat();
         String title = currentTrack != null ? currentTrack.title : "SleepPlayer";
         Notification notification = NotificationHelper.buildSleepNotification(
                 this, mediaSession, title);

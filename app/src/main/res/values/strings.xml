@@ -85,6 +85,14 @@
     <string name="norm_context_title">Normalisierung</string>
     <string name="norm_start_analysis">Analysieren</string>
 
+    <!-- Battery optimization -->
+    <string name="battery_opt_title">🎧 Kopfhörer-Zuverlässigkeit</string>
+    <string name="battery_opt_button">Akku-Optimierung prüfen</string>
+    <string name="battery_opt_ok">✅ Akku-Optimierung bereits deaktiviert</string>
+    <string name="battery_opt_dialog_title">Kopfhörer-Tasten nach langem Sleep</string>
+    <string name="battery_opt_dialog_msg">Wenn die Kopfhörer-Tasten nach dem Schlafen nicht oder mit großer Verzögerung reagieren, liegt das an Androids Energiesparmodus (Doze Mode).\n\nLösung: SleepPlayer von der Akku-Optimierung ausnehmen. Dann bleibt der Service auch nach Stunden im Hintergrund vollständig reaktiv.\n\nAuf der nächsten Seite: App auswählen → \"Nicht optimieren\".</string>
+    <string name="battery_opt_open_settings">Zu den Einstellungen</string>
+
     <!-- Meditation (4-7-8 Atemübung) -->
     <string name="meditation_start">🧘 Atemübung 4-7-8 starten</string>
     <string name="meditation_stop">🧘 Atemübung beenden</string>

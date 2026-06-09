@@ -14,6 +14,9 @@
     <!-- WakeLock damit der Player nicht im Sleep stoppt -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Akku-Optimierung deaktivieren (für zuverlässige Kopfhörer-Tasten nach langem Sleep) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Notification permission (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
