@@ -1,9 +1,14 @@
 package com.example.sleepplayer;
 
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.app.AlertDialog;
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.database.ContentObserver;
@@ -68,8 +73,14 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     private AudioManager audioManager;
     private ContentObserver volumeObserver;
     private int lastSystemVolume = -1;
+    private BroadcastReceiver headsetReceiver;
+    private ImageView ivAudioOutput;
+
+    /** Pulsiert die Now-Playing-Kachel türkis solange die Zeitansage läuft. */
+    private ValueAnimator announcementAnimator;
 
     // Views
+    private com.google.android.material.card.MaterialCardView cardNowPlaying;
     private TextView tvTrackName;
     private TextView tvTrackArtist;
     private ImageView ivAlbumArt;
@@ -215,6 +226,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     protected void onResume() {
         super.onResume();
         registerVolumeObserver();
+        registerAudioDeviceCallback();
         // Fortschrittsbalken starten falls gerade abgespielt wird
         if (isBound && playbackService != null && playbackService.isPlaying()) {
             progressHandler.post(progressRunnable);
@@ -225,6 +237,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     protected void onPause() {
         super.onPause();
         unregisterVolumeObserver();
+        unregisterAudioDeviceCallback();
         progressHandler.removeCallbacks(progressRunnable);
     }
 
@@ -285,6 +298,42 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         }
     }
 
+    private void registerAudioDeviceCallback() {
+        headsetReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                updateAudioOutputIcon();
+            }
+        };
+        // ACTION_HEADSET_PLUG ist ein Sticky-Broadcast → liefert sofort den aktuellen Zustand
+        IntentFilter filter = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
+        registerReceiver(headsetReceiver, filter);
+        updateAudioOutputIcon();
+    }
+
+    private void unregisterAudioDeviceCallback() {
+        if (headsetReceiver != null) {
+            try {
+                unregisterReceiver(headsetReceiver);
+            } catch (IllegalArgumentException ignored) {}
+            headsetReceiver = null;
+        }
+    }
+
+    private void updateAudioOutputIcon() {
+        if (ivAudioOutput == null) return;
+        AudioOutputHelper.OutputType type = AudioOutputHelper.detect(audioManager).type;
+        boolean suppressed = prefsManager.isOutputSuppressed(type);
+        int iconRes;
+        switch (type) {
+            case BLUETOOTH: iconRes = suppressed ? R.drawable.ic_bluetooth_audio_off : R.drawable.ic_bluetooth_audio; break;
+            case WIRED:     iconRes = suppressed ? R.drawable.ic_headphones_off : R.drawable.ic_headphones; break;
+            default:        iconRes = suppressed ? R.drawable.ic_speaker_off : R.drawable.ic_speaker; break;
+        }
+        ivAudioOutput.setImageResource(iconRes);
+        ivAudioOutput.setAlpha(suppressed ? 1.0f : 0.7f);
+    }
+
     // ===== Initialisierung =====
 
     private void initViews() {
@@ -310,6 +359,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         seekProgress = findViewById(R.id.seekProgress);
         tvCurrentPosition = findViewById(R.id.tvCurrentPosition);
         tvTrackDurationLabel = findViewById(R.id.tvTrackDurationLabel);
+        ivAudioOutput = findViewById(R.id.ivAudioOutput);
+        cardNowPlaying = findViewById(R.id.cardNowPlaying);
 
         btnPlayPause.setOnClickListener(v -> onPlayPauseClicked());
         btnSkip.setOnClickListener(v -> onSkipClicked());
@@ -885,6 +936,46 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 openMeditationActivity();
             }
         });
+    }
+
+    @Override
+    public void onAnnouncementStateChanged(boolean speaking) {
+        runOnUiThread(() -> {
+            if (speaking) {
+                startAnnouncementAnimation();
+            } else {
+                stopAnnouncementAnimation();
+            }
+        });
+    }
+
+    /**
+     * Färbt die Now-Playing-Kachel türkis ein solange die Zeitansage läuft – sichtbares
+     * Feedback dass der Play-Befehl angekommen ist, auch wenn die Lautstärke
+     * gerade sehr gering oder stummgeschaltet ist. Einmaliges Ein-/Ausfaden statt
+     * Blinken, damit es ruhig wirkt.
+     */
+    private void startAnnouncementAnimation() {
+        if (cardNowPlaying == null) return;
+        animateCardColor(R.color.surface, R.color.teal_200);
+    }
+
+    private void stopAnnouncementAnimation() {
+        if (cardNowPlaying == null) return;
+        animateCardColor(R.color.teal_200, R.color.surface);
+    }
+
+    private void animateCardColor(int fromColorRes, int toColorRes) {
+        if (announcementAnimator != null) {
+            announcementAnimator.cancel();
+            announcementAnimator = null;
+        }
+        int fromColor = ContextCompat.getColor(this, fromColorRes);
+        int toColor = ContextCompat.getColor(this, toColorRes);
+        announcementAnimator = ValueAnimator.ofObject(new ArgbEvaluator(), fromColor, toColor);
+        announcementAnimator.setDuration(400);
+        announcementAnimator.addUpdateListener(a -> cardNowPlaying.setCardBackgroundColor((int) a.getAnimatedValue()));
+        announcementAnimator.start();
     }
 
     // ===== UI Sync =====

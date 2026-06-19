@@ -24,6 +24,11 @@ public class PrefsManager {
     private static final String KEY_RANDOM_MODE = "random_mode";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
 
+    // --- Audioausgabe stummschalten (pro Gerätetyp) ---
+    private static final String KEY_SUPPRESS_SPEAKER   = "suppress_speaker";
+    private static final String KEY_SUPPRESS_WIRED      = "suppress_wired";
+    private static final String KEY_SUPPRESS_BLUETOOTH  = "suppress_bluetooth";
+
     // --- Kompressor ---
     private static final String KEY_COMP_ENABLED   = "comp_enabled";
     private static final String KEY_COMP_THRESHOLD = "comp_threshold"; // dB, -40…0
@@ -142,6 +147,27 @@ public class PrefsManager {
         return prefs.getBoolean(KEY_TTS_ENABLED, true);
     }
 
+
+    // --- Audioausgabe stummschalten ---
+
+    public void saveSuppressSpeaker(boolean suppress)    { prefs.edit().putBoolean(KEY_SUPPRESS_SPEAKER, suppress).apply(); }
+    public boolean isSuppressSpeaker()                   { return prefs.getBoolean(KEY_SUPPRESS_SPEAKER, false); }
+
+    public void saveSuppressWired(boolean suppress)       { prefs.edit().putBoolean(KEY_SUPPRESS_WIRED, suppress).apply(); }
+    public boolean isSuppressWired()                      { return prefs.getBoolean(KEY_SUPPRESS_WIRED, false); }
+
+    public void saveSuppressBluetooth(boolean suppress)   { prefs.edit().putBoolean(KEY_SUPPRESS_BLUETOOTH, suppress).apply(); }
+    public boolean isSuppressBluetooth()                   { return prefs.getBoolean(KEY_SUPPRESS_BLUETOOTH, false); }
+
+    /** Gibt zurück ob die Ausgabe auf dem angegebenen Gerätetyp stummgeschaltet ist. */
+    public boolean isOutputSuppressed(AudioOutputHelper.OutputType type) {
+        switch (type) {
+            case SPEAKER:   return isSuppressSpeaker();
+            case WIRED:     return isSuppressWired();
+            case BLUETOOTH: return isSuppressBluetooth();
+            default:        return false;
+        }
+    }
 
     // --- Meditations-Effekte ---
 

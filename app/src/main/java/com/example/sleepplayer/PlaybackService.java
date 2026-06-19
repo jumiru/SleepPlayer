@@ -1,11 +1,15 @@
 package com.example.sleepplayer;
 
+import android.app.AlarmManager;
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
@@ -42,6 +46,9 @@ public class PlaybackService extends Service {
 
     private static final String TAG = "PlaybackService";
 
+    /** Intent-Action die HeartbeatReceiver an den Service schickt. */
+    public static final String ACTION_SLEEP_HEARTBEAT = "com.example.sleepplayer.ACTION_SLEEP_HEARTBEAT";
+
     /** Dauer des Fade-outs in Millisekunden (letzte 60 Sekunden vor Timer-Ende). */
     private static final long FADE_OUT_DURATION_MS = 60_000L;
 
@@ -59,6 +66,7 @@ public class PlaybackService extends Service {
     private MediaPlayer mediaPlayer;
     private MediaSessionCompat mediaSession;
     private AudioManager audioManager;
+    private AudioDeviceCallback audioDeviceCallback;
     private AudioFocusRequest audioFocusRequest;
     private TrackSelector trackSelector;
     private PrefsManager prefsManager;
@@ -110,8 +118,6 @@ public class PlaybackService extends Service {
      */
     private PowerManager.WakeLock serviceWakeLock;
 
-    private final Handler sleepHeartbeatHandler = new Handler(Looper.getMainLooper());
-    private final Runnable sleepHeartbeatRunnable = () -> runSleepHeartbeat();
 
     private TrackSelector.TrackInfo currentTrack;
 
@@ -131,6 +137,12 @@ public class PlaybackService extends Service {
         void onTimerFinished();
         /** Wird aufgerufen wenn der Meditations-Modus ein-/ausgeschaltet wird. */
         default void onMeditationStateChanged(boolean active, MeditationController.Phase phase, int cycle) {}
+        /**
+         * Wird aufgerufen wenn die Zeitansage (TTS) startet/endet – auch bei
+         * sehr geringer/stummgeschalteter Lautstärke soll die UI sichtbar reagieren,
+         * damit erkennbar ist dass der Play-Befehl angekommen ist.
+         */
+        default void onAnnouncementStateChanged(boolean speaking) {}
     }
 
     /**
@@ -221,6 +233,22 @@ public class PlaybackService extends Service {
             registerReceiver(noisyAudioReceiver, noisyIntentFilter);
         }
 
+        // Erkennt Geräte-Wechsel (Kopfhörer ab/angesteckt, Bluetooth ver-/entbunden) in Echtzeit –
+        // auch während der Service im Hintergrund/Sleep-Mode läuft. Nötig für die
+        // Stummschalt-Funktion (effectiveVolume()) und zum Diagnose-Logging.
+        audioDeviceCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                onAudioRouteChanged();
+            }
+
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                onAudioRouteChanged();
+            }
+        };
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler);
+
         // Service-WakeLock initialisieren (noch nicht acquiren)
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         serviceWakeLock = pm.newWakeLock(
@@ -295,6 +323,8 @@ public class PlaybackService extends Service {
                 // Nutzer hat die Sleep-Mode-Notification weggewischt → Service vollständig beenden
                 Log.d(TAG, "ACTION_DISMISS empfangen – Service wird beendet");
                 stopAllPlaybackAndMeditation();
+            } else if (ACTION_SLEEP_HEARTBEAT.equals(action)) {
+                handleHeartbeat();
             } else {
                 // Könnte ein MediaButton-Intent sein
                 MediaButtonReceiver.handleIntent(mediaSession, intent);
@@ -325,6 +355,10 @@ public class PlaybackService extends Service {
             unregisterReceiver(noisyAudioReceiver);
         } catch (IllegalArgumentException ignored) {
             // Receiver war bereits abgemeldet oder nie registriert
+        }
+        if (audioDeviceCallback != null) {
+            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+            audioDeviceCallback = null;
         }
         if (meditationController != null) {
             meditationController.release();
@@ -467,6 +501,7 @@ public class PlaybackService extends Service {
                             .build());
             player.setDataSource(this, track.uri);
             player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
+            applyPreferredOutputDevice(player);
             player.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
 
             player.setOnPreparedListener(mp -> {
@@ -573,11 +608,16 @@ public class PlaybackService extends Service {
 
     /**
      * Spricht die aktuelle Uhrzeit (mit Track-Lautstärke) und ruft danach {@code action} aus.
-     * Falls TTS deaktiviert oder nicht verfügbar, wird {@code action} sofort ausgeführt.
+     * Falls TTS deaktiviert, nicht verfügbar, oder das aktuelle Ausgabegerät laut
+     * Einstellungen stummgeschaltet ist, wird {@code action} sofort ausgeführt.
      */
     private void speakTimeAndThen(Runnable action) {
-        if (ttsHelper != null && prefsManager.isTtsEnabled()) {
-            ttsHelper.speakCurrentTime(currentVolume, action);
+        if (ttsHelper != null && prefsManager.isTtsEnabled() && !isCurrentOutputSuppressed()) {
+            if (callback != null) callback.onAnnouncementStateChanged(true);
+            ttsHelper.speakCurrentTime(currentVolume, () -> {
+                if (callback != null) callback.onAnnouncementStateChanged(false);
+                action.run();
+            });
         } else {
             action.run();
         }
@@ -624,6 +664,8 @@ public class PlaybackService extends Service {
                 Log.w(TAG, "Audio Focus nicht erhalten in resumePlayback() – result=" + result);
                 return;
             }
+            // Routing erneut erzwingen – falls sich das Ausgabegerät während der Pause geändert hat
+            applyPreferredOutputDevice(mediaPlayer);
             // Lautstärke wiederherstellen – nach Fade-out ist sie nahe 0
             mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
             try {
@@ -1099,27 +1141,54 @@ public class PlaybackService extends Service {
         mediaSession.setMetadata(metadata);
     }
 
+    /**
+     * Plant den AlarmManager-Heartbeat für den Sleep-Mode.
+     * setAndAllowWhileIdle() weckt die CPU auch im Doze-Mode auf —
+     * Handler.postDelayed() würde ohne WakeLock einschlafen.
+     * Bewusst NICHT setExactAndAllowWhileIdle(): das wirft ab targetSdk 33 eine
+     * SecurityException ohne SCHEDULE_EXACT_ALARM-Permission und hat den Service
+     * nachts beim Eintritt in den Sleep-Mode zum Absturz gebracht. Exakte Zeit
+     * wird hier nicht benötigt – ein paar Minuten Drift sind für den Heartbeat egal.
+     */
     private void startSleepHeartbeat() {
-        sleepHeartbeatHandler.removeCallbacks(sleepHeartbeatRunnable);
-        sleepHeartbeatHandler.postDelayed(sleepHeartbeatRunnable, SLEEP_HEARTBEAT_INTERVAL_MS);
-        Log.d(TAG, "Sleep-Heartbeat gestartet (" + SLEEP_HEARTBEAT_INTERVAL_MS / 1000 + "s Intervall)");
+        stopSleepHeartbeat();
+        scheduleHeartbeatAlarm();
+        LogManager.getInstance(this).log(TAG, "Sleep-Heartbeat geplant ("
+                + SLEEP_HEARTBEAT_INTERVAL_MS / 1000 + "s, AlarmManager)");
     }
 
     private void stopSleepHeartbeat() {
-        sleepHeartbeatHandler.removeCallbacks(sleepHeartbeatRunnable);
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        if (am != null) {
+            am.cancel(getHeartbeatPendingIntent());
+        }
     }
 
-    /** Wird alle 3 Minuten im Sleep-Mode aufgerufen – hält die MediaSession im Doze-Mode aktiv. */
-    private void runSleepHeartbeat() {
+    private PendingIntent getHeartbeatPendingIntent() {
+        Intent intent = new Intent(this, HeartbeatReceiver.class);
+        intent.setAction(ACTION_SLEEP_HEARTBEAT);
+        return PendingIntent.getBroadcast(this, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private void scheduleHeartbeatAlarm() {
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        if (am == null) return;
+        long triggerAt = System.currentTimeMillis() + SLEEP_HEARTBEAT_INTERVAL_MS;
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, getHeartbeatPendingIntent());
+    }
+
+    /** Wird vom HeartbeatReceiver ausgelöst – hält die MediaSession im Doze-Mode aktiv. */
+    private void handleHeartbeat() {
         if (isPlaying || isMeditating()) {
             return;
         }
-        Log.d(TAG, "Sleep-Heartbeat: MediaSession auffrischen");
+        LogManager.getInstance(this).log(TAG, "Sleep-Heartbeat empfangen: MediaSession auffrischen (Doze-sicher)");
         if (mediaSession != null) {
             mediaSession.setActive(true);
             updatePlaybackState(PlaybackStateCompat.STATE_PAUSED);
         }
-        sleepHeartbeatHandler.postDelayed(sleepHeartbeatRunnable, SLEEP_HEARTBEAT_INTERVAL_MS);
+        scheduleHeartbeatAlarm();
     }
 
     private void showNotification() {
@@ -1182,11 +1251,55 @@ public class PlaybackService extends Service {
     }
 
     /**
-     * Berechnet die effektive Lautstärke unter Berücksichtigung des Track-Gains.
+     * Berechnet die effektive Lautstärke unter Berücksichtigung des Track-Gains
+     * und der Stummschalt-Einstellung für das aktuell aktive Ausgabegerät.
      * Ergebnis ist immer im Bereich [0.0, 1.0].
      */
     private float effectiveVolume(float base) {
+        if (isCurrentOutputSuppressed()) {
+            return 0.0f;
+        }
         return Math.max(0.0f, Math.min(1.0f, base * currentTrackGain));
+    }
+
+    /** Gibt zurück ob das aktuell aktive Audio-Ausgabegerät laut Einstellungen stummgeschaltet ist. */
+    private boolean isCurrentOutputSuppressed() {
+        AudioOutputHelper.OutputType type = AudioOutputHelper.detect(audioManager).type;
+        return prefsManager.isOutputSuppressed(type);
+    }
+
+    /**
+     * Wird aufgerufen wenn sich die verfügbaren Audio-Ausgabegeräte ändern
+     * (Kopfhörer ab-/angesteckt, Bluetooth ver-/entbunden) – auch im Sleep-Mode.
+     * Wendet die Stummschalt-Regel sofort auf den laufenden Player an, statt
+     * erst beim nächsten Play/Pause-Tastendruck.
+     */
+    private void onAudioRouteChanged() {
+        AudioOutputHelper.OutputType type = AudioOutputHelper.detect(audioManager).type;
+        LogManager.getInstance(this).log(TAG, "Audio-Route geändert: " + type
+                + " | suppressed=" + prefsManager.isOutputSuppressed(type)
+                + " | isPlaying=" + isPlaying);
+        if (mediaPlayer != null) {
+            mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
+        }
+    }
+
+    /**
+     * Erzwingt das Routing auf das aktuell erkannte Wired/Bluetooth-Gerät, statt sich
+     * auf die automatische Geräte-Auswahl von Android zu verlassen ("reactivate"-Workaround).
+     * Hintergrund: nach langem Doze-Schlaf wurde beobachtet, dass die Wiedergabe trotz
+     * angestecktem Kopfhörer auf den Lautsprecher ausweicht. setPreferredDevice() bindet
+     * den Player explizit an das zum Start-Zeitpunkt erkannte Gerät.
+     */
+    private void applyPreferredOutputDevice(MediaPlayer player) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
+            return;
+        }
+        AudioOutputHelper.Result route = AudioOutputHelper.detect(audioManager);
+        boolean ok = player.setPreferredDevice(route.device);
+        LogManager.getInstance(this).log(TAG, "Preferred Device: " + route.type
+                + (route.device != null ? " (" + route.device.getProductName() + ")" : " (Standard)")
+                + " gesetzt=" + ok);
     }
 
 

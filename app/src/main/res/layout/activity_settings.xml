@@ -189,6 +189,34 @@
 
             </LinearLayout>
 
+            <!-- Audioausgabe stummschalten -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/dark_surface"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔇 Audioausgabe stummschalten"
+                    android:textColor="@color/teal_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnAudioOutputSuppress"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="Ausgabegeräte wählen"
+                    android:textColor="@color/white"
+                    android:backgroundTint="@color/dark_accent" />
+
+            </LinearLayout>
+
             <!-- Debug Logs -->
             <LinearLayout
                 android:layout_width="match_parent"

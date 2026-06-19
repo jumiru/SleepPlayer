@@ -37,6 +37,7 @@ public class SettingsActivity extends AppCompatActivity {
     private Button btnMeditationEffects;
     private Button btnCompressor;
     private Button btnBatteryOptimization;
+    private Button btnAudioOutputSuppress;
     private Button btnLogs;
 
     private PrefsManager prefsManager;
@@ -73,6 +74,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnMeditationEffects = findViewById(R.id.btnMeditationEffects);
         btnCompressor = findViewById(R.id.btnCompressor);
         btnBatteryOptimization = findViewById(R.id.btnBatteryOptimization);
+        btnAudioOutputSuppress = findViewById(R.id.btnAudioOutputSuppress);
         btnLogs = findViewById(R.id.btnLogs);
     }
 
@@ -83,6 +85,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnMeditationEffects.setOnClickListener(v -> showMeditationEffectsDialog());
         btnCompressor.setOnClickListener(v -> showCompressorDialog());
         btnBatteryOptimization.setOnClickListener(v -> checkBatteryOptimization());
+        btnAudioOutputSuppress.setOnClickListener(v -> showAudioOutputSuppressDialog());
         btnLogs.setOnClickListener(v -> openLogActivity());
     }
 
@@ -422,6 +425,62 @@ public class SettingsActivity extends AppCompatActivity {
                             "✅ Reverb " + (swReverb.isChecked() ? "an" : "aus")
                             + "  •  Delay " + (swDelay.isChecked() ? "an" : "aus"),
                             Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Dialog zum Stummschalten einzelner Audioausgabegeräte.
+     * Ist ein Gerät stummgeschaltet, wird die Wiedergabe-Lautstärke auf 0 gesetzt
+     * solange dieses Gerät aktiv ist (PlaybackService.effectiveVolume());
+     * das Icon in der Hauptansicht zeigt das stummgeschaltete Gerät durchgestrichen an.
+     */
+    private void showAudioOutputSuppressDialog() {
+        float dp = getResources().getDisplayMetrics().density;
+        int pad = (int) (16 * dp);
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(pad, pad / 2, pad, pad);
+
+        android.widget.TextView tvInfo = new android.widget.TextView(this);
+        tvInfo.setTextColor(0xFF90A4AE);
+        tvInfo.setTextSize(11f);
+        tvInfo.setPadding(0, 0, 0, (int) (8 * dp));
+        tvInfo.setText("Stummgeschaltete Geräte spielen keinen Ton, auch wenn sie gerade aktiv sind"
+                + " (z.B. falls der Kopfhörer über Nacht ausfällt und auf Lautsprecher umschaltet).");
+        root.addView(tvInfo);
+
+        com.google.android.material.materialswitch.MaterialSwitch swSpeaker =
+                new com.google.android.material.materialswitch.MaterialSwitch(this);
+        swSpeaker.setText("🔊 Lautsprecher stummschalten");
+        swSpeaker.setChecked(prefsManager.isSuppressSpeaker());
+        swSpeaker.setTextColor(0xFFFFFFFF);
+        root.addView(swSpeaker);
+
+        com.google.android.material.materialswitch.MaterialSwitch swWired =
+                new com.google.android.material.materialswitch.MaterialSwitch(this);
+        swWired.setText("🎧 Kabelgebundenen Kopfhörer stummschalten");
+        swWired.setChecked(prefsManager.isSuppressWired());
+        swWired.setTextColor(0xFFFFFFFF);
+        root.addView(swWired);
+
+        com.google.android.material.materialswitch.MaterialSwitch swBluetooth =
+                new com.google.android.material.materialswitch.MaterialSwitch(this);
+        swBluetooth.setText("📶 Bluetooth-Kopfhörer stummschalten");
+        swBluetooth.setChecked(prefsManager.isSuppressBluetooth());
+        swBluetooth.setTextColor(0xFFFFFFFF);
+        root.addView(swBluetooth);
+
+        new AlertDialog.Builder(this)
+                .setTitle("🔇 Audioausgabe stummschalten")
+                .setView(root)
+                .setPositiveButton("Speichern", (d, w) -> {
+                    prefsManager.saveSuppressSpeaker(swSpeaker.isChecked());
+                    prefsManager.saveSuppressWired(swWired.isChecked());
+                    prefsManager.saveSuppressBluetooth(swBluetooth.isChecked());
+                    Toast.makeText(this, "Einstellungen gespeichert", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
