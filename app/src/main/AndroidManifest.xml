@@ -17,6 +17,10 @@
     <!-- Akku-Optimierung deaktivieren (für zuverlässige Kopfhörer-Tasten nach langem Sleep) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Exakte Alarme für den Sleep-Heartbeat (Doze wirft setAndAllowWhileIdle()
+         sonst nach Stunden in immer größere Maintenance-Windows zurück) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
     <!-- Notification permission (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

@@ -14,6 +14,7 @@ import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Binder;
+import android.os.Build;
 import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.IBinder;
@@ -309,24 +310,27 @@ public class PlaybackService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        LogManager logManager = LogManager.getInstance(this);
-        logManager.log(TAG, "Service onStartCommand aufgerufen");
+        LogManager lm = LogManager.getInstance(this);
+        String action = intent != null ? intent.getAction() : null;
+        lm.log(TAG, "onStartCommand: action=" + action
+                + " | flags=" + flags + " | startId=" + startId
+                + " | isPlaying=" + isPlaying
+                + " | timerRunning=" + isTimerRunning
+                + " | meditating=" + isMeditating()
+                + " | wakeLock=" + (serviceWakeLock != null && serviceWakeLock.isHeld()));
 
         if (intent != null) {
-            String action = intent.getAction();
-
             if (NotificationHelper.ACTION_PLAY_PAUSE.equals(action)) {
                 togglePlayPause();
             } else if (NotificationHelper.ACTION_STOP.equals(action)) {
                 stopAllPlaybackAndMeditation();
             } else if (NotificationHelper.ACTION_DISMISS.equals(action)) {
-                // Nutzer hat die Sleep-Mode-Notification weggewischt → Service vollständig beenden
-                Log.d(TAG, "ACTION_DISMISS empfangen – Service wird beendet");
+                lm.log(TAG, "ACTION_DISMISS → Service wird beendet");
                 stopAllPlaybackAndMeditation();
             } else if (ACTION_SLEEP_HEARTBEAT.equals(action)) {
                 handleHeartbeat();
             } else {
-                // Könnte ein MediaButton-Intent sein
+                lm.log(TAG, "onStartCommand: Weitergabe an MediaButtonReceiver");
                 MediaButtonReceiver.handleIntent(mediaSession, intent);
             }
         }
@@ -571,12 +575,14 @@ public class PlaybackService extends Service {
      * startet danach den Track bzw. setzt die Wiedergabe fort.
      */
     public void togglePlayPause() {
-        Log.d(TAG, "togglePlayPause() – isPlaying=" + isPlaying
-                + ", hasPlayer=" + (mediaPlayer != null)
-                + ", currentTrack=" + (currentTrack != null ? currentTrack.title : "null")
-                + ", isMeditating=" + isMeditating()
-                + ", isTimerRunning=" + isTimerRunning
-                + ", wakeLockHeld=" + (serviceWakeLock != null && serviceWakeLock.isHeld()));
+        LogManager.getInstance(this).log(TAG, "togglePlayPause()"
+                + " | isPlaying=" + isPlaying
+                + " | hasPlayer=" + (mediaPlayer != null)
+                + " | currentTrack=" + (currentTrack != null ? currentTrack.title : "null")
+                + " | isMeditating=" + isMeditating()
+                + " | isTimerRunning=" + isTimerRunning
+                + " | isFadingOut=" + isFadingOut
+                + " | wakeLock=" + (serviceWakeLock != null && serviceWakeLock.isHeld()));
 
         // Wenn Meditation läuft → Pause = Meditation beenden, zurück in Schlafmodus
         if (isMeditating()) {
@@ -765,6 +771,30 @@ public class PlaybackService extends Service {
     public void skipToNext() {
         Log.d(TAG, "skipToNext()");
         startRandomPlayback();
+    }
+
+    /**
+     * Lautstärke einen Schritt erhöhen oder senken (Kopfhörer-Lautstärke-Taste, Einzelklick).
+     * Speichert den neuen Wert in den Prefs damit er nach einem Neustart erhalten bleibt.
+     */
+    public void adjustVolume(boolean up) {
+        int progress = VolumeHelper.volumeToProgress(currentVolume);
+        int step = 10; // 10 von 200 Steps ≈ 5% der Skala
+        progress = up ? Math.min(VolumeHelper.SEEK_BAR_MAX, progress + step)
+                      : Math.max(0, progress - step);
+        setVolume(VolumeHelper.progressToVolume(progress));
+        prefsManager.saveVolume(progress);
+        LogManager.getInstance(this).log(TAG, "adjustVolume: " + (up ? "+" : "-")
+                + " → progress=" + progress + " volume=" + String.format("%.3f", currentVolume));
+    }
+
+    /**
+     * Springt zum Anfang des aktuellen Tracks (Doppelklick Leiser).
+     */
+    public void seekToBeginning() {
+        LogManager.getInstance(this).log(TAG, "seekToBeginning()"
+                + " | currentTrack=" + (currentTrack != null ? currentTrack.title : "null"));
+        seekTo(0);
     }
 
     // ===== Meditation =====
@@ -1077,25 +1107,31 @@ public class PlaybackService extends Service {
     }
 
     private void onAudioFocusChange(int focusChange) {
-        Log.d(TAG, "onAudioFocusChange: " + focusChange);
+        String desc;
+        switch (focusChange) {
+            case AudioManager.AUDIOFOCUS_GAIN:                    desc = "GAIN"; break;
+            case AudioManager.AUDIOFOCUS_LOSS:                    desc = "LOSS"; break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:          desc = "LOSS_TRANSIENT"; break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK: desc = "LOSS_CAN_DUCK"; break;
+            default:                                              desc = "UNBEKANNT(" + focusChange + ")";
+        }
+        LogManager.getInstance(this).log(TAG, "AudioFocus: " + desc
+                + " | isPlaying=" + isPlaying
+                + " | isMeditating=" + isMeditating());
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_LOSS:
-                // Dauerhafter Verlust → pausieren
                 pausePlayback();
                 break;
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                // Kurzer Verlust → pausieren
                 pausePlayback();
                 break;
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-                // Leiser machen
                 if (mediaPlayer != null) {
                     mediaPlayer.setVolume(effectiveVolume(currentVolume) * 0.3f,
                             effectiveVolume(currentVolume) * 0.3f);
                 }
                 break;
             case AudioManager.AUDIOFOCUS_GAIN:
-                // Focus zurück → Lautstärke wiederherstellen
                 if (mediaPlayer != null) {
                     mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
                 }
@@ -1143,12 +1179,12 @@ public class PlaybackService extends Service {
 
     /**
      * Plant den AlarmManager-Heartbeat für den Sleep-Mode.
-     * setAndAllowWhileIdle() weckt die CPU auch im Doze-Mode auf —
-     * Handler.postDelayed() würde ohne WakeLock einschlafen.
-     * Bewusst NICHT setExactAndAllowWhileIdle(): das wirft ab targetSdk 33 eine
-     * SecurityException ohne SCHEDULE_EXACT_ALARM-Permission und hat den Service
-     * nachts beim Eintritt in den Sleep-Mode zum Absturz gebracht. Exakte Zeit
-     * wird hier nicht benötigt – ein paar Minuten Drift sind für den Heartbeat egal.
+     * setAndAllowWhileIdle()/setExactAndAllowWhileIdle() wecken die CPU auch im
+     * Doze-Mode auf — Handler.postDelayed() würde ohne WakeLock einschlafen.
+     * Mit SCHEDULE_EXACT_ALARM-Permission wird exakt geplant: ohne sie wirft
+     * Android in tiefem Doze die Maintenance-Windows für inexakte Alarme über
+     * die Nacht auf mehrere Stunden hoch, wodurch der Heartbeat ausbleibt und
+     * die MediaSession (und damit die Kopfhörer-Tasten) morgens tot ist.
      */
     private void startSleepHeartbeat() {
         stopSleepHeartbeat();
@@ -1175,20 +1211,34 @@ public class PlaybackService extends Service {
         AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
         if (am == null) return;
         long triggerAt = System.currentTimeMillis() + SLEEP_HEARTBEAT_INTERVAL_MS;
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, getHeartbeatPendingIntent());
+        PendingIntent pendingIntent = getHeartbeatPendingIntent();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && am.canScheduleExactAlarms()) {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+        } else {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+        }
     }
 
     /** Wird vom HeartbeatReceiver ausgelöst – hält die MediaSession im Doze-Mode aktiv. */
     private void handleHeartbeat() {
+        LogManager lm = LogManager.getInstance(this);
         if (isPlaying || isMeditating()) {
+            lm.log(TAG, "Heartbeat empfangen – übersprungen (isPlaying=" + isPlaying
+                    + " isMeditating=" + isMeditating() + ")");
             return;
         }
-        LogManager.getInstance(this).log(TAG, "Sleep-Heartbeat empfangen: MediaSession auffrischen (Doze-sicher)");
+        boolean sessionActive = mediaSession != null && mediaSession.isActive();
+        lm.log(TAG, "Heartbeat: MediaSession auffrischen"
+                + " | sessionActive-vorher=" + sessionActive
+                + " | currentTrack=" + (currentTrack != null ? currentTrack.title : "null")
+                + " | mediaPlayer=" + (mediaPlayer != null ? "vorhanden" : "null")
+                + " | wakeLock=" + (serviceWakeLock != null && serviceWakeLock.isHeld()));
         if (mediaSession != null) {
             mediaSession.setActive(true);
             updatePlaybackState(PlaybackStateCompat.STATE_PAUSED);
         }
         scheduleHeartbeatAlarm();
+        lm.log(TAG, "Heartbeat: nächster Alarm in " + SLEEP_HEARTBEAT_INTERVAL_MS / 1000 + "s geplant");
     }
 
     private void showNotification() {
@@ -1275,12 +1325,17 @@ public class PlaybackService extends Service {
      * erst beim nächsten Play/Pause-Tastendruck.
      */
     private void onAudioRouteChanged() {
-        AudioOutputHelper.OutputType type = AudioOutputHelper.detect(audioManager).type;
-        LogManager.getInstance(this).log(TAG, "Audio-Route geändert: " + type
-                + " | suppressed=" + prefsManager.isOutputSuppressed(type)
-                + " | isPlaying=" + isPlaying);
+        AudioOutputHelper.Result route = AudioOutputHelper.detect(audioManager);
+        boolean suppressed = prefsManager.isOutputSuppressed(route.type);
+        float vol = effectiveVolume(currentVolume);
+        LogManager.getInstance(this).log(TAG, "Audio-Route geändert: " + route.type
+                + " | device=" + (route.device != null ? route.device.getProductName() : "null")
+                + " | suppressed=" + suppressed
+                + " | effectiveVol=" + String.format("%.3f", vol)
+                + " | isPlaying=" + isPlaying
+                + " | isMeditating=" + isMeditating());
         if (mediaPlayer != null) {
-            mediaPlayer.setVolume(effectiveVolume(currentVolume), effectiveVolume(currentVolume));
+            mediaPlayer.setVolume(vol, vol);
         }
     }
 

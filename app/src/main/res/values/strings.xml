@@ -92,6 +92,12 @@
     <string name="battery_opt_dialog_title">Kopfhörer-Tasten nach langem Sleep</string>
     <string name="battery_opt_dialog_msg">Wenn die Kopfhörer-Tasten nach dem Schlafen nicht oder mit großer Verzögerung reagieren, liegt das an Androids Energiesparmodus (Doze Mode).\n\nLösung: SleepPlayer von der Akku-Optimierung ausnehmen. Dann bleibt der Service auch nach Stunden im Hintergrund vollständig reaktiv.\n\nAuf der nächsten Seite: App auswählen → \"Nicht optimieren\".</string>
     <string name="battery_opt_open_settings">Zu den Einstellungen</string>
+    <string name="exact_alarm_button">Exakte Alarme prüfen</string>
+    <string name="exact_alarm_ok">✅ Exakte Alarme bereits erlaubt</string>
+    <string name="exact_alarm_dialog_title">Heartbeat im Doze-Mode</string>
+    <string name="exact_alarm_dialog_msg">Ohne diese Berechtigung verschiebt Android den Sleep-Heartbeat in tiefem Doze-Mode irgendwann um mehrere Stunden – dann reagieren die Kopfhörer-Tasten morgens nicht mehr.\n\nLösung: SleepPlayer die Berechtigung \"Alarme &amp; Erinnerungen\" erlauben. Dann wird der Heartbeat exakt zugestellt statt von Doze beliebig verzögert.</string>
+    <string name="exact_alarm_open_settings">Zu den Einstellungen</string>
+    <string name="exact_alarm_not_required">Nicht erforderlich auf diesem Android</string>
 
     <!-- Meditation (4-7-8 Atemübung) -->
     <string name="meditation_start">🧘 Atemübung 4-7-8 starten</string>

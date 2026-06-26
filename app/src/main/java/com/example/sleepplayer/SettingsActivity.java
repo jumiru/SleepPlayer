@@ -1,5 +1,6 @@
 package com.example.sleepplayer;
 
+import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
@@ -37,6 +38,7 @@ public class SettingsActivity extends AppCompatActivity {
     private Button btnMeditationEffects;
     private Button btnCompressor;
     private Button btnBatteryOptimization;
+    private Button btnExactAlarm;
     private Button btnAudioOutputSuppress;
     private Button btnLogs;
 
@@ -74,6 +76,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnMeditationEffects = findViewById(R.id.btnMeditationEffects);
         btnCompressor = findViewById(R.id.btnCompressor);
         btnBatteryOptimization = findViewById(R.id.btnBatteryOptimization);
+        btnExactAlarm = findViewById(R.id.btnExactAlarm);
         btnAudioOutputSuppress = findViewById(R.id.btnAudioOutputSuppress);
         btnLogs = findViewById(R.id.btnLogs);
     }
@@ -85,6 +88,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnMeditationEffects.setOnClickListener(v -> showMeditationEffectsDialog());
         btnCompressor.setOnClickListener(v -> showCompressorDialog());
         btnBatteryOptimization.setOnClickListener(v -> checkBatteryOptimization());
+        btnExactAlarm.setOnClickListener(v -> checkExactAlarmPermission());
         btnAudioOutputSuppress.setOnClickListener(v -> showAudioOutputSuppressDialog());
         btnLogs.setOnClickListener(v -> openLogActivity());
     }
@@ -109,6 +113,29 @@ public class SettingsActivity extends AppCompatActivity {
                 .setPositiveButton(getString(R.string.battery_opt_open_settings), (d, w) -> {
                     Intent intent = new Intent(
                             Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void checkExactAlarmPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            Toast.makeText(this, getString(R.string.exact_alarm_not_required), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        if (am.canScheduleExactAlarms()) {
+            Toast.makeText(this, getString(R.string.exact_alarm_ok), Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.exact_alarm_dialog_title))
+                .setMessage(getString(R.string.exact_alarm_dialog_msg))
+                .setPositiveButton(getString(R.string.exact_alarm_open_settings), (d, w) -> {
+                    Intent intent = new Intent(
+                            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                             Uri.parse("package:" + getPackageName()));
                     startActivity(intent);
                 })
