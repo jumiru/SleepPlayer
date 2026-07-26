@@ -9,9 +9,12 @@ import android.view.KeyEvent;
 /**
  * Callback für MediaSession – verarbeitet Kopfhörer-Tasten-Events.
  *
- * 1× Klick:  Play/Pause
- * 2× Klick:  Nächster Track (zufällig)
- * 3× Klick:  Meditation ein-/ausschalten
+ * 1× Klick:        Play/Pause
+ * 2× Klick (oder mehr), während Track läuft:  Nächster Track (zufällig)
+ * 2× Klick (oder mehr), während pausiert:     Meditation ein-/ausschalten
+ *
+ * Ab 2 Klicks wird also nicht mehr nach Klickzahl unterschieden, sondern
+ * modusabhängig entschieden (isPlaying) – 3× Klick etc. verhält sich wie 2×.
  *
  * Langer Druck wird vom Android-System für Gemini/Voice-Assistent abgefangen
  * und erreicht diese Klasse nicht – daher kein Long-Press-Handling.
@@ -22,7 +25,7 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
 
     /**
      * Wartefenster nach dem letzten Klick, bevor die Aktion ausgeführt wird.
-     * Lang genug für Dreifachklick-Erkennung, kurz genug für flüssige Bedienung.
+     * Lang genug für Mehrfachklick-Erkennung, kurz genug für flüssige Bedienung.
      */
     private static final long CLICK_WINDOW_MS = 450;
 
@@ -41,12 +44,14 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
             if (count == 1) {
                 log("1× Klick → togglePlayPause()");
                 service.togglePlayPause();
-            } else if (count == 2) {
-                log("2× Klick → skipToNext()");
-                service.skipToNext();
-            } else if (count >= 3) {
-                log("3× Klick → toggleMeditation()");
-                service.toggleMeditation();
+            } else if (count >= 2) {
+                if (service.isPlaying()) {
+                    log(count + "× Klick, Track läuft → skipToNext()");
+                    service.skipToNext();
+                } else {
+                    log(count + "× Klick, pausiert → toggleMeditation()");
+                    service.toggleMeditation();
+                }
             }
         };
     }
