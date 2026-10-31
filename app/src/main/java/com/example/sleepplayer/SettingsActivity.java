@@ -30,7 +30,7 @@ import java.util.List;
  * - Kompressor
  * - Referenz-Track
  */
-public class SettingsActivity extends AppCompatActivity {
+public class SettingsActivity extends AppCompatActivity implements FolderDialogs.Host {
 
     private ImageButton btnBack;
     private Button btnFolderSelect;
@@ -144,12 +144,11 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     /**
-     * Dialog zur Ordner-Auswahl
+     * Dialog zur Ordner-Verwaltung (mehrere Basisordner) + Zeitansage
      */
     private void showFolderDialog() {
         String[] options = {
-                getString(R.string.settings_folder_select),
-                getString(R.string.settings_folder_clear),
+                getString(R.string.folder_manage),
                 getString(R.string.tts_toggle)
         };
 
@@ -158,13 +157,9 @@ public class SettingsActivity extends AppCompatActivity {
                 .setItems(options, (d, which) -> {
                     switch (which) {
                         case 0:
-                            folderPickerLauncher.launch(null);
+                            FolderDialogs.showManage(this, prefsManager, this);
                             break;
                         case 1:
-                            prefsManager.clearFolder();
-                            Toast.makeText(this, R.string.folder_all, Toast.LENGTH_SHORT).show();
-                            break;
-                        case 2:
                             boolean newTts = !prefsManager.isTtsEnabled();
                             prefsManager.saveTtsEnabled(newTts);
                             Toast.makeText(this,
@@ -175,6 +170,17 @@ public class SettingsActivity extends AppCompatActivity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    @Override
+    public void requestAddFolder() {
+        folderPickerLauncher.launch(null);
+    }
+
+    @Override
+    public void onFoldersChanged() {
+        // MainActivity lädt die Trackliste in onResume neu, der Service merkt
+        // den Ordnerwechsel selbst (TrackSelector-Cache vergleicht den Pfad).
     }
 
     /**
@@ -250,24 +256,9 @@ public class SettingsActivity extends AppCompatActivity {
                 progressDialog.setMessage(getString(R.string.norm_progress_msg, 0, total));
             });
 
-            // Referenz-Track finden
-            TrackSelector.TrackInfo refTrack = null;
-            for (TrackSelector.TrackInfo t : allTracks) {
-                if (t.uri.toString().equals(refUri)) {
-                    refTrack = t;
-                    break;
-                }
-            }
-
-            if (refTrack == null) {
-                runOnUiThread(() -> {
-                    progressDialog.dismiss();
-                    Toast.makeText(this, R.string.norm_ref_not_found, Toast.LENGTH_LONG).show();
-                });
-                return;
-            }
-
-            float refDb = AudioAnalyzer.analyzeRmsDb(this, refTrack.uri);
+            // Referenz-Track direkt über seine URI analysieren – er muss nicht
+            // im aktuell gewählten Ordner liegen (gleiche Referenz für alle Ordner).
+            float refDb = AudioAnalyzer.analyzeRmsDb(this, Uri.parse(refUri));
             if (Float.isNaN(refDb)) {
                 runOnUiThread(() -> {
                     progressDialog.dismiss();
@@ -655,32 +646,9 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     /**
-     * Wird aufgerufen wenn der Benutzer einen Ordner ausgewählt hat
+     * Wird aufgerufen wenn der Benutzer einen Ordner hinzugefügt hat
      */
     private void onFolderSelected(Uri treeUri) {
-        String displayName = extractFolderDisplayName(treeUri);
-        prefsManager.saveFolderUri(treeUri.toString());
-        prefsManager.saveFolderDisplayName(displayName);
-        Toast.makeText(this, getString(R.string.settings_folder_title) + ": " + displayName,
-                Toast.LENGTH_SHORT).show();
-    }
-
-    /**
-     * Extrahiert einen lesbaren Ordnernamen aus einem SAF Tree-URI
-     */
-    private String extractFolderDisplayName(Uri treeUri) {
-        String path = treeUri.getPath();
-        if (path != null && path.startsWith("/tree/")) {
-            String docId = path.substring(6); // nach "/tree/"
-            int colonIndex = docId.indexOf(':');
-            if (colonIndex >= 0 && colonIndex < docId.length() - 1) {
-                return docId.substring(colonIndex + 1);
-            }
-        }
-        return treeUri.getLastPathSegment();
+        FolderDialogs.onFolderPicked(this, prefsManager, this, treeUri);
     }
 }
-
-
-
-

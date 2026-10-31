@@ -53,6 +53,17 @@
     <string name="folder_select">Ordner wählen</string>
     <string name="folder_clear">Zurücksetzen</string>
     <string name="folder_selected">Ordner: %s</string>
+    <string name="folder_quick_title">📁 Ordner für Trackauswahl</string>
+    <string name="folder_manage">Ordner verwalten…</string>
+    <string name="folder_add">➕ Ordner hinzufügen…</string>
+    <string name="folder_close">Schließen</string>
+    <string name="folder_action_select">Auswählen</string>
+    <string name="folder_action_rename">Umbenennen</string>
+    <string name="folder_action_remove">Entfernen</string>
+    <string name="folder_remove_confirm">„%s“ aus der Liste entfernen?
+
+Die Dateien bleiben erhalten, die dB-Werte der Titel ebenfalls.</string>
+    <string name="tracks_found_in_folder">📁 %1$s · %2$d Titel ▾</string>
 
     <!-- TTS setting -->
     <string name="tts_enabled">Zeitansage beim Start</string>

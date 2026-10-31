@@ -358,12 +358,17 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:textSize="12sp"
-            android:textColor="#80FFFFFF"
+            android:textSize="13sp"
+            android:textColor="@color/teal_200"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
             app:layout_constraintTop_toBottomOf="@id/etSearch"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            tools:text="42 Titel gefunden" />
+            tools:text="📁 Sport · 42 Titel ▾" />
 
         <!-- ===== Track-Liste (füllt restlichen Platz) ===== -->
         <androidx.recyclerview.widget.RecyclerView

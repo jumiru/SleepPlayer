@@ -61,7 +61,8 @@ import java.util.Locale;
  * - Sleep-Timer mit Auswahl und Restzeit-Anzeige
  * - Liste aller verfügbaren Audio-Tracks
  */
-public class MainActivity extends AppCompatActivity implements PlaybackService.PlaybackCallback {
+public class MainActivity extends AppCompatActivity
+        implements PlaybackService.PlaybackCallback, FolderDialogs.Host {
 
     // Timer-Optionen in Minuten
     private static final int[] TIMER_OPTIONS = {5, 10, 15, 20, 30, 45, 60, 90, 120};
@@ -147,6 +148,18 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 }
             });
 
+    /** Ordner-URI, mit der die Trackliste zuletzt geladen wurde (null = alle). */
+    private String loadedFolderUri = null;
+    private boolean tracksLoadedOnce = false;
+
+    // Ordner hinzufügen (System-Ordnerauswahl)
+    private final ActivityResultLauncher<Uri> folderPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
+                if (uri != null) {
+                    FolderDialogs.onFolderPicked(this, prefsManager, this, uri);
+                }
+            });
+
     // Notification Permission Launcher
     private final ActivityResultLauncher<String> requestNotificationLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
@@ -227,6 +240,10 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         super.onResume();
         registerVolumeObserver();
         registerAudioDeviceCallback();
+        // Ordner wurde (z.B. in den Einstellungen) gewechselt → Liste neu laden
+        if (tracksLoadedOnce && !java.util.Objects.equals(loadedFolderUri, prefsManager.getFolderUri())) {
+            loadTracks();
+        }
         // Fortschrittsbalken starten falls gerade abgespielt wird
         if (isBound && playbackService != null && playbackService.isPlaying()) {
             progressHandler.post(progressRunnable);
@@ -352,6 +369,7 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         tvTimerRemaining = findViewById(R.id.tvTimerRemaining);
         btnMeditation = findViewById(R.id.btnMeditation);
         tvTrackCount = findViewById(R.id.tvTrackCount);
+        tvTrackCount.setOnClickListener(v -> FolderDialogs.showQuickSelect(this, prefsManager, this));
         recyclerTracks = findViewById(R.id.recyclerTracks);
         etSearch = findViewById(R.id.etSearch);
         overlayAlbumArt = findViewById(R.id.overlayAlbumArt);
@@ -559,6 +577,11 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
     }
 
     private void loadTracks() {
+        loadedFolderUri = prefsManager.getFolderUri();
+        tracksLoadedOnce = true;
+        String folderName = prefsManager.getFolderDisplayName();
+        String folderLabel = loadedFolderUri == null || folderName == null
+                ? getString(R.string.folder_all) : folderName;
         // MediaStore-Query im Hintergrund laden (kein Main-Thread I/O)
         new Thread(() -> {
             TrackSelector selector = new TrackSelector(this);
@@ -566,8 +589,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             List<TrackSelector.TrackInfo> tracks = selector.getAllTracks();
             runOnUiThread(() -> {
                 trackAdapter.setTracks(tracks);
-                tvTrackCount.setText(String.format(Locale.getDefault(),
-                        getString(R.string.tracks_found), tracks.size()));
+                tvTrackCount.setText(getString(R.string.tracks_found_in_folder,
+                        folderLabel, tracks.size()));
                 if (tracks.isEmpty()) {
                     tvTrackName.setText(R.string.no_audio_files);
                 } else {
@@ -710,15 +733,9 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
             if (track.uri.toString().equals(refUri)) {
                 refDb = AudioAnalyzer.analyzeRmsDb(this, track.uri, p -> runOnUiThread(() -> pb.setProgress(p)));
             } else {
-                // Analyse der Referenz (schnell, nur 60s)
-                TrackSelector selector = isBound && playbackService != null
-                        ? playbackService.getTrackSelector() : new TrackSelector(this);
-                for (TrackSelector.TrackInfo t : selector.getAllTracks()) {
-                    if (t.uri.toString().equals(refUri)) {
-                        refDb = AudioAnalyzer.analyzeRmsDb(this, t.uri);
-                        break;
-                    }
-                }
+                // Referenz direkt über URI analysieren – auch wenn sie in einem
+                // anderen Ordner liegt als der aktuell gewählte.
+                refDb = AudioAnalyzer.analyzeRmsDb(this, Uri.parse(refUri));
                 if (Float.isNaN(refDb)) {
                     runOnUiThread(() -> { dlg.dismiss();
                         Toast.makeText(this, R.string.norm_ref_analysis_failed, Toast.LENGTH_LONG).show(); });
@@ -797,23 +814,8 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
                 progressDialog.setMessage(getString(R.string.norm_progress_msg, 0, total));
             });
 
-            // 1) Referenz-RMS berechnen
-            TrackSelector.TrackInfo refTrack = null;
-            for (TrackSelector.TrackInfo t : allTracks) {
-                if (t.uri.toString().equals(refUri)) {
-                    refTrack = t;
-                    break;
-                }
-            }
-            if (refTrack == null) {
-                runOnUiThread(() -> {
-                    progressDialog.dismiss();
-                    Toast.makeText(this, R.string.norm_ref_not_found, Toast.LENGTH_LONG).show();
-                });
-                return;
-            }
-
-            float refDb = AudioAnalyzer.analyzeRmsDb(this, refTrack.uri);
+            // 1) Referenz-RMS berechnen (Referenz darf in anderem Ordner liegen)
+            float refDb = AudioAnalyzer.analyzeRmsDb(this, Uri.parse(refUri));
             if (Float.isNaN(refDb)) {
                 runOnUiThread(() -> {
                     progressDialog.dismiss();
@@ -867,35 +869,16 @@ public class MainActivity extends AppCompatActivity implements PlaybackService.P
         }, "NormalizationThread").start();
     }
 
-    /**
-     * Wird aufgerufen wenn der Benutzer einen Ordner ausgewählt hat.
-     */
-    private void onFolderSelected(Uri treeUri) {
-        String displayName = extractFolderDisplayName(treeUri);
-        prefsManager.saveFolderUri(treeUri.toString());
-        prefsManager.saveFolderDisplayName(displayName);
-        loadTracks();
-        Toast.makeText(this, getString(R.string.settings_folder_title) + ": " + displayName,
-                Toast.LENGTH_SHORT).show();
+    // ===== Ordner-Verwaltung (FolderDialogs.Host) =====
+
+    @Override
+    public void requestAddFolder() {
+        folderPickerLauncher.launch(null);
     }
 
-    /**
-     * Extrahiert einen lesbaren Ordnernamen aus einem SAF Tree-URI.
-     * z.B. "content://...externalstorage.../tree/primary%3AMusic%2FSleep"
-     *  → "Music/Sleep"
-     */
-    private String extractFolderDisplayName(Uri treeUri) {
-        String path = treeUri.getPath();
-        if (path != null && path.startsWith("/tree/")) {
-            String docId = path.substring(6); // nach "/tree/"
-            // docId: "primary:Music/Sleep" oder "XXXX-XXXX:Folder"
-            int colonIndex = docId.indexOf(':');
-            if (colonIndex >= 0 && colonIndex < docId.length() - 1) {
-                return docId.substring(colonIndex + 1);
-            }
-        }
-        // Fallback: letztes Segment des URI
-        return treeUri.getLastPathSegment();
+    @Override
+    public void onFoldersChanged() {
+        loadTracks();
     }
 
     @Override

@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,7 @@ public class PrefsManager {
     private static final String KEY_RECENT_TRACKS = "recent_tracks";
     private static final String KEY_FOLDER_URI = "folder_uri";
     private static final String KEY_FOLDER_DISPLAY = "folder_display_name";
+    private static final String KEY_FOLDER_LIST = "folder_list_json"; // [{uri, name}, …]
     private static final String KEY_RANDOM_MODE = "random_mode";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
 
@@ -115,12 +117,140 @@ public class PrefsManager {
 
     /**
      * Löscht den Ordner-Filter (zurück zu "alle Dateien").
+     * Die gespeicherte Ordnerliste bleibt erhalten.
      */
     public void clearFolder() {
         prefs.edit()
                 .remove(KEY_FOLDER_URI)
                 .remove(KEY_FOLDER_DISPLAY)
                 .apply();
+    }
+
+    // --- Mehrere Basisordner ---
+
+    /** Ein gespeicherter Basisordner (SAF-Tree-URI + frei wählbarer Name). */
+    public static class FolderEntry {
+        public final String uri;
+        public final String name;
+
+        public FolderEntry(String uri, String name) {
+            this.uri = uri;
+            this.name = name;
+        }
+    }
+
+    /**
+     * Gibt alle gespeicherten Basisordner zurück.
+     * Migration: ein vor dieser Version gewählter Einzelordner wird automatisch übernommen.
+     */
+    public List<FolderEntry> getFolders() {
+        List<FolderEntry> result = new ArrayList<>();
+        String json = prefs.getString(KEY_FOLDER_LIST, null);
+        if (json != null) {
+            try {
+                JSONArray arr = new JSONArray(json);
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject o = arr.getJSONObject(i);
+                    result.add(new FolderEntry(o.getString("uri"), o.optString("name", "")));
+                }
+            } catch (JSONException e) {
+                // Ignore corrupt data
+            }
+        }
+        // Migration des alten Einzelordners
+        String activeUri = getFolderUri();
+        if (activeUri != null && findFolder(result, activeUri) < 0) {
+            String name = getFolderDisplayName();
+            result.add(new FolderEntry(activeUri, name != null ? name : activeUri));
+            saveFolders(result);
+        }
+        return result;
+    }
+
+    private void saveFolders(List<FolderEntry> folders) {
+        JSONArray arr = new JSONArray();
+        try {
+            for (FolderEntry f : folders) {
+                JSONObject o = new JSONObject();
+                o.put("uri", f.uri);
+                o.put("name", f.name);
+                arr.put(o);
+            }
+        } catch (JSONException e) {
+            return;
+        }
+        prefs.edit().putString(KEY_FOLDER_LIST, arr.toString()).apply();
+    }
+
+    private static int findFolder(List<FolderEntry> folders, String uri) {
+        for (int i = 0; i < folders.size(); i++) {
+            if (folders.get(i).uri.equals(uri)) return i;
+        }
+        return -1;
+    }
+
+    /** Fügt einen Ordner hinzu (falls noch nicht vorhanden). */
+    public void addFolder(String uri, String name) {
+        List<FolderEntry> folders = getFolders();
+        if (findFolder(folders, uri) >= 0) return;
+        folders.add(new FolderEntry(uri, name));
+        saveFolders(folders);
+    }
+
+    /** Benennt einen Ordner um (betrifft nur den Anzeigenamen). */
+    public void renameFolder(String uri, String newName) {
+        List<FolderEntry> folders = getFolders();
+        int idx = findFolder(folders, uri);
+        if (idx < 0) return;
+        folders.set(idx, new FolderEntry(uri, newName));
+        saveFolders(folders);
+        if (uri.equals(getFolderUri())) saveFolderDisplayName(newName);
+    }
+
+    /**
+     * Entfernt einen Ordner aus der Liste. War er aktiv, wird auf "alle Dateien"
+     * zurückgeschaltet. Normalisierungswerte (dB) bleiben unberührt.
+     */
+    public void removeFolder(String uri) {
+        List<FolderEntry> folders = getFolders();
+        int idx = findFolder(folders, uri);
+        if (idx < 0) return;
+        folders.remove(idx);
+        saveFolders(folders);
+        if (uri.equals(getFolderUri())) clearFolder();
+    }
+
+    /** Aktiviert einen Ordner für die Trackauswahl (null = alle Audio-Dateien). */
+    public void setActiveFolder(String uri) {
+        if (uri == null) {
+            clearFolder();
+            return;
+        }
+        List<FolderEntry> folders = getFolders();
+        int idx = findFolder(folders, uri);
+        String name = idx >= 0 ? folders.get(idx).name : null;
+        prefs.edit()
+                .putString(KEY_FOLDER_URI, uri)
+                .putString(KEY_FOLDER_DISPLAY, name)
+                .apply();
+    }
+
+    /**
+     * Extrahiert einen lesbaren Ordnernamen aus einem SAF-Tree-URI,
+     * z.B. ".../tree/primary%3AMusic%2FSport" → "Sport".
+     */
+    public static String defaultFolderName(android.net.Uri treeUri) {
+        String path = treeUri.getPath();
+        if (path != null && path.startsWith("/tree/")) {
+            String docId = path.substring(6);
+            int colon = docId.indexOf(':');
+            String rel = colon >= 0 ? docId.substring(colon + 1) : docId;
+            while (rel.endsWith("/")) rel = rel.substring(0, rel.length() - 1);
+            if (rel.isEmpty()) return docId;
+            int slash = rel.lastIndexOf('/');
+            return slash >= 0 ? rel.substring(slash + 1) : rel;
+        }
+        return treeUri.getLastPathSegment();
     }
 
     // --- Zufallswiedergabe ---

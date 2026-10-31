@@ -3,13 +3,24 @@ package com.example.sleepplayer;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.UriPermission;
 import android.database.Cursor;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
+import android.util.Log;
+
+import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
 
 /**
  * Wählt zufällig Audio-Tracks aus dem MediaStore aus.
@@ -17,6 +28,11 @@ import java.util.Random;
  * Kann optional auf einen bestimmten Ordner gefiltert werden.
  */
 public class TrackSelector {
+
+    private static final String TAG = "TrackSelector";
+    private static final long MIN_DURATION_MS = 30000;
+    /** Cache fuer Metadaten direkt gescannter Dateien (Dauer/Titel/Interpret). */
+    private static final String META_PREFS = "sleep_player_saf_meta";
 
     private final Context context;
     private final PrefsManager prefsManager;
@@ -89,8 +105,8 @@ public class TrackSelector {
             return cachedTracks;
         }
 
-        cachedTracks = new ArrayList<>();
-        cachedFolderPath = folderPath;
+        List<TrackInfo> tracks = new ArrayList<>();
+        Set<String> indexedPaths = new HashSet<>();
 
         ContentResolver resolver = context.getContentResolver();
         Uri collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
@@ -131,6 +147,7 @@ public class TrackSelector {
                 int albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM);
                 int albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID);
                 int durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+                int dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA);
 
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(idCol);
@@ -148,12 +165,31 @@ public class TrackSelector {
                         artist = "Unbekannt";
                     }
 
-                    cachedTracks.add(new TrackInfo(id, title, artist, album, albumId, duration, uri));
+                    tracks.add(new TrackInfo(id, title, artist, album, albumId, duration, uri));
+                    String data = cursor.getString(dataCol);
+                    if (data != null) indexedPaths.add(data);
                 }
             }
         }
 
-        return cachedTracks;
+        // Ordner direkt durchsuchen: findet auch Dateien, die Android nicht
+        // in den MediaStore aufnimmt (z.B. Podcast-Ordner mit .nomedia-Datei).
+        int before = tracks.size();
+        for (String treeUri : getScannableTrees()) {
+            try {
+                scanTree(Uri.parse(treeUri), indexedPaths, tracks);
+            } catch (Exception e) {
+                Log.w(TAG, "Ordner-Scan fehlgeschlagen: " + treeUri, e);
+            }
+        }
+        if (tracks.size() > before) {
+            Collections.sort(tracks, (a, b) -> a.title.compareToIgnoreCase(b.title));
+            Log.d(TAG, (tracks.size() - before) + " Titel per Ordner-Scan ergaenzt");
+        }
+
+        cachedTracks = tracks;
+        cachedFolderPath = folderPath;
+        return tracks;
     }
 
     /**
@@ -203,6 +239,150 @@ public class TrackSelector {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Welche Ordner werden direkt durchsucht? Nur solche mit dauerhafter
+     * Leseberechtigung: der aktive Ordner, oder bei "Alle Audio-Dateien"
+     * alle gespeicherten Ordner.
+     */
+    private List<String> getScannableTrees() {
+        Set<String> granted = new HashSet<>();
+        for (UriPermission perm : context.getContentResolver().getPersistedUriPermissions()) {
+            if (perm.isReadPermission()) granted.add(perm.getUri().toString());
+        }
+        List<String> result = new ArrayList<>();
+        String active = prefsManager.getFolderUri();
+        if (active != null) {
+            if (granted.contains(active)) result.add(active);
+        } else {
+            for (PrefsManager.FolderEntry f : prefsManager.getFolders()) {
+                if (granted.contains(f.uri)) result.add(f.uri);
+            }
+        }
+        return result;
+    }
+
+    /** Durchsucht einen SAF-Ordnerbaum rekursiv (inkl. aller Unterordner). */
+    private void scanTree(Uri treeUri, Set<String> knownPaths, List<TrackInfo> out) {
+        ContentResolver resolver = context.getContentResolver();
+        SharedPreferences meta = context.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE);
+        SharedPreferences.Editor metaEdit = null;
+
+        String[] projection = {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        };
+
+        List<String> pending = new ArrayList<>();
+        pending.add(DocumentsContract.getTreeDocumentId(treeUri));
+
+        while (!pending.isEmpty()) {
+            String parentId = pending.remove(pending.size() - 1);
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId);
+            try (Cursor c = resolver.query(childrenUri, projection, null, null, null)) {
+                if (c == null) continue;
+                while (c.moveToNext()) {
+                    String docId = c.getString(0);
+                    String name = c.getString(1);
+                    String mime = c.getString(2);
+                    long modified = c.isNull(3) ? 0 : c.getLong(3);
+
+                    if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                        pending.add(docId);
+                        continue;
+                    }
+                    if (!isAudio(name, mime)) continue;
+
+                    // Schon ueber den MediaStore gefunden? -> nicht doppelt aufnehmen
+                    // (MediaStore-URI behaelt ihre bisherigen dB-Werte).
+                    String path = docIdToPath(docId);
+                    if (path != null && !knownPaths.add(path)) continue;
+
+                    Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+                    String key = docUri.toString();
+
+                    String title = null, artist = null, album = null;
+                    long duration = 0;
+                    boolean cached = false;
+                    String json = meta.getString(key, null);
+                    if (json != null) {
+                        try {
+                            JSONObject o = new JSONObject(json);
+                            if (o.optLong("m") == modified) {
+                                duration = o.optLong("d");
+                                title = o.has("t") ? o.getString("t") : null;
+                                artist = o.has("a") ? o.getString("a") : null;
+                                album = o.has("al") ? o.getString("al") : null;
+                                cached = true;
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    if (!cached) {
+                        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+                        try {
+                            mmr.setDataSource(context, docUri);
+                            String d = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                            duration = d != null ? Long.parseLong(d) : 0;
+                            title = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
+                            artist = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
+                            album = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM);
+                        } catch (Exception e) {
+                            Log.w(TAG, "Metadaten nicht lesbar: " + name);
+                        } finally {
+                            try { mmr.release(); } catch (Exception ignored) { }
+                        }
+                        try {
+                            JSONObject o = new JSONObject();
+                            o.put("m", modified);
+                            o.put("d", duration);
+                            if (title != null) o.put("t", title);
+                            if (artist != null) o.put("a", artist);
+                            if (album != null) o.put("al", album);
+                            if (metaEdit == null) metaEdit = meta.edit();
+                            metaEdit.putString(key, o.toString());
+                        } catch (Exception ignored) { }
+                    }
+
+                    // Gleiche Mindestlaenge wie beim MediaStore (0 = unbekannt -> aufnehmen)
+                    if (duration > 0 && duration < MIN_DURATION_MS) continue;
+
+                    if (title == null || title.isEmpty()) {
+                        int dot = name.lastIndexOf('.');
+                        title = dot > 0 ? name.substring(0, dot) : name;
+                    }
+                    if (artist == null || artist.isEmpty() || "<unknown>".equals(artist)) {
+                        artist = album != null && !album.isEmpty() ? album : "Unbekannt";
+                    }
+
+                    long id = -(Math.abs((long) key.hashCode()) + 1); // negativ = kein MediaStore-Eintrag
+                    out.add(new TrackInfo(id, title, artist, album, 0, duration, docUri));
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Ordner nicht lesbar: " + parentId, e);
+            }
+        }
+        if (metaEdit != null) metaEdit.apply();
+    }
+
+    private static boolean isAudio(String name, String mime) {
+        if (mime != null && mime.startsWith("audio/")) return true;
+        if (name == null) return false;
+        String n = name.toLowerCase(Locale.ROOT);
+        return n.endsWith(".mp3") || n.endsWith(".m4a") || n.endsWith(".aac")
+                || n.endsWith(".ogg") || n.endsWith(".opus") || n.endsWith(".flac")
+                || n.endsWith(".wav") || n.endsWith(".m4b");
+    }
+
+    /** "primary:Music/x.mp3" -> "/storage/emulated/0/Music/x.mp3" */
+    private static String docIdToPath(String docId) {
+        String[] parts = docId.split(":", 2);
+        if (parts.length < 2) return null;
+        String base = "primary".equalsIgnoreCase(parts[0])
+                ? "/storage/emulated/0/" : "/storage/" + parts[0] + "/";
+        return base + parts[1];
     }
 
     /**
