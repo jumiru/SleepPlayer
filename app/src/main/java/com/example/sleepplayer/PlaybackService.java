@@ -241,6 +241,10 @@ public class PlaybackService extends Service {
             @Override
             public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
                 onAudioRouteChanged();
+                // Gerät nach Doze/USB-Suspend wieder aktiv → Routing neu binden
+                if (mediaPlayer != null) {
+                    applyPreferredOutputDevice(mediaPlayer);
+                }
             }
 
             @Override
